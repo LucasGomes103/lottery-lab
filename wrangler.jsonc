@@ -1,0 +1,7 @@
+{
+  "name": "lottery-lab",
+  "compatibility_date": "2026-08-26",
+  "assets": {
+    "directory": "./frontend/dist/lottery-lab-web"
+  }
+}
