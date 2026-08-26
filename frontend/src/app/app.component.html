@@ -16,11 +16,12 @@
       </div>
       <p *ngFor="let warning of preview.warnings" class="warn">{{warning}}</p>
 
-      <article *ngFor="let extraction of preview.extractions" class="extraction">
+      <article *ngFor="let extraction of preview.extractions; let extractionIndex = index" class="extraction">
         <div class="extraction-fields">
           <label>Banca <input [(ngModel)]="extraction.bank"></label>
           <label>Data <input type="date" [(ngModel)]="extraction.date"></label>
           <label>Horário <input type="time" [(ngModel)]="extraction.time"></label>
+          <button type="button" class="danger" (click)="removeExtraction(extractionIndex)">Remover horário</button>
         </div>
         <p *ngFor="let warning of extraction.warnings" class="warn">{{warning}}</p>
         <table>
@@ -33,7 +34,7 @@
           </tr></tbody>
         </table>
       </article>
-      <div class="actions"><button (click)="commit()" [disabled]="committing || !preview.extractions.length">{{committing ? 'Importando...' : 'Confirmar todas as extrações'}}</button></div>
+      <div class="actions"><button type="button" class="secondary" (click)="addExtraction()">Adicionar horário ausente</button><button (click)="commit()" [disabled]="committing || !preview.extractions.length">{{committing ? 'Importando...' : 'Confirmar todas as extrações'}}</button></div>
     </div>
   </section>
 

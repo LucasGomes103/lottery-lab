@@ -33,8 +33,8 @@ public sealed class PdfImportService(IConfiguration configuration, ILogger<PdfIm
         {
             usedOcr = true;
             warnings.Add("O PDF não possui texto utilizável; a leitura foi realizada por OCR.");
-            text = await ExtractWithOcrAsync(bytes, cancellationToken);
-            extractions = ParseText(text);
+            var ocrCandidates = await ExtractWithOcrAsync(bytes, cancellationToken);
+            extractions = MergeOcrExtractions(ocrCandidates.Select(ParseText));
         }
 
         if (extractions.Count == 0) warnings.Add("Nenhum horário reconhecido. Revise a qualidade do documento.");
@@ -101,7 +101,35 @@ public sealed class PdfImportService(IConfiguration configuration, ILogger<PdfIm
         return string.Join("\n", document.GetPages().Select(page => page.Text));
     }
 
-    private async Task<string> ExtractWithOcrAsync(byte[] bytes, CancellationToken cancellationToken)
+    private static List<ParsedExtraction> MergeOcrExtractions(IEnumerable<List<ParsedExtraction>> candidates)
+    {
+        var all = candidates.SelectMany(x => x).ToList();
+        return all
+            .Where(x => x.Time is not null)
+            .GroupBy(x => $"{x.Bank}|{x.Date}|{x.Time}")
+            .Select(group =>
+            {
+                var sample = group.First();
+                var results = group
+                    .SelectMany(x => x.Results)
+                    .GroupBy(x => x.Position)
+                    .Select(position => position
+                        .GroupBy(x => x.Number)
+                        .OrderByDescending(numbers => numbers.Count())
+                        .ThenByDescending(numbers => numbers.First().Number.Length)
+                        .First().First())
+                    .OrderBy(x => x.Position)
+                    .ToList();
+                var warnings = new List<string>();
+                if (sample.Date is null) warnings.Add("Data não reconhecida.");
+                if (results.Count != 7) warnings.Add($"Foram reconhecidos {results.Count} de 7 resultados.");
+                return new ParsedExtraction(sample.Date, sample.Bank, sample.Time, results, warnings);
+            })
+            .OrderBy(x => x.Time)
+            .ToList();
+    }
+
+    private async Task<List<string>> ExtractWithOcrAsync(byte[] bytes, CancellationToken cancellationToken)
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), "lottery-lab", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempRoot);
@@ -117,10 +145,15 @@ public sealed class PdfImportService(IConfiguration configuration, ILogger<PdfIm
 
             var tesseract = configuration["Ocr:TesseractPath"] ?? "tesseract";
             var language = configuration["Ocr:Language"] ?? "por";
-            var output = new StringBuilder();
-            foreach (var page in pages)
-                output.AppendLine(await RunProcessAsync(tesseract, [page, "stdout", "-l", language, "--psm", "6", "-c", "preserve_interword_spaces=1"], cancellationToken));
-            return output.ToString();
+            var outputs = new List<string>();
+            foreach (var segmentationMode in new[] { "4", "6", "11" })
+            {
+                var output = new StringBuilder();
+                foreach (var page in pages)
+                    output.AppendLine(await RunProcessAsync(tesseract, [page, "stdout", "-l", language, "--psm", segmentationMode, "-c", "preserve_interword_spaces=1"], cancellationToken));
+                outputs.Add(output.ToString());
+            }
+            return outputs;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

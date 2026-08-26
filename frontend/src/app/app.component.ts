@@ -33,14 +33,16 @@ export class AppComponent {
         this.error = '';
         this.message = '';
         this.http.post<ImportPreview>(this.api + '/imports/preview', form).subscribe({
-            next: preview => { this.preview = preview; this.loading = false; },
+            next: preview => { this.prepareForReview(preview); this.preview = preview; this.loading = false; },
             error: error => { this.error = this.errorMessage(error); this.loading = false; }
         });
     }
 
     normalize(result: ParsedResult) {
         const length = result.position === 7 ? 3 : 4;
-        result.number = result.number.replace(/\D/g, '').slice(-length).padStart(length, '0');
+        const digits = result.number.replace(/\D/g, '');
+        if (!digits) { result.number = ''; result.milhar = null; result.centena = null; result.dezena = null; result.group = null; result.animal = null; return; }
+        result.number = digits.slice(-length).padStart(length, '0');
         result.dezena = result.number.slice(-2);
         result.centena = result.number.slice(-3);
         result.milhar = result.position === 7 ? null : result.number;
@@ -48,6 +50,22 @@ export class AppComponent {
         result.group = value === 0 ? 25 : Math.ceil(value / 4);
         const animals = ['AVESTRUZ','AGUIA','BURRO','BORBOLETA','CACHORRO','CABRA','CARNEIRO','CAMELO','COBRA','COELHO','CAVALO','ELEFANTE','GALO','GATO','JACARE','LEAO','MACACO','PORCO','PAVAO','PERU','TOURO','TIGRE','URSO','VEADO','VACA'];
         result.animal = animals[result.group - 1];
+    }
+
+    addExtraction() {
+        if (!this.preview) return;
+        const sample = this.preview.extractions[0];
+        this.preview.extractions.push({
+            bank: sample?.bank || 'LT NACIONAL',
+            date: sample?.date || null,
+            time: null,
+            results: Array.from({ length: 7 }, (_, index) => this.emptyResult(index + 1)),
+            warnings: ['Horário incluído manualmente. Preencha todos os resultados.']
+        });
+    }
+
+    removeExtraction(index: number) {
+        this.preview?.extractions.splice(index, 1);
     }
 
     commit() {
@@ -77,5 +95,18 @@ export class AppComponent {
         const errors = error.error?.errors as string[] | undefined;
         if (errors?.length) return `${error.error.message} ${errors.join(' ')}`;
         return error.error?.message || 'Não foi possível concluir a operação. Tente novamente.';
+    }
+
+    private prepareForReview(preview: ImportPreview) {
+        for (const extraction of preview.extractions) {
+            for (let position = 1; position <= 7; position++) {
+                if (!extraction.results.some(result => result.position === position)) extraction.results.push(this.emptyResult(position));
+            }
+            extraction.results.sort((left, right) => left.position - right.position);
+        }
+    }
+
+    private emptyResult(position: number): ParsedResult {
+        return { position, number: '', milhar: null, centena: null, dezena: null, group: null, animal: null };
     }
 }
