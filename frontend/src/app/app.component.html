@@ -1,0 +1,8 @@
+<header><h1>Lottery Lab</h1><p>Importação, histórico, backtest e análise estatística</p></header>
+<main>
+<section><h2>1. Importar PDF</h2><input type="file" accept="application/pdf" (change)="select($event)"><span *ngIf="loading"> Lendo...</span>
+<div *ngIf="preview" class="card"><b>{{preview.fileName}}</b> — {{preview.bank}} — {{preview.date}} {{preview.time}}<p>{{preview.results.length}} resultados reconhecidos.</p><table><tr><th>Pos.</th><th>Número</th><th>Dezena</th><th>Grupo</th><th>Animal</th></tr><tr *ngFor="let r of preview.results"><td>{{r.position}}</td><td>{{r.number}}</td><td>{{r.dezena}}</td><td>{{r.group}}</td><td>{{r.animal}}</td></tr></table><button (click)="commit()">Confirmar importação</button></div></section>
+<section><h2>2. Análise</h2><div class="filters"><label>Banca <input [(ngModel)]="bank"></label><label>Horário <input type="time" [(ngModel)]="time"></label><label>Janela <input type="number" [(ngModel)]="windowDays"></label><button (click)="analyze()">Calcular</button><button (click)="ask()">Analisar com IA</button></div>
+<div *ngIf="forecast" class="card"><h3>Ranking híbrido</h3><table><tr><th>#</th><th>Dezena</th><th>Score</th><th>Continuidade</th><th>Atraso</th><th>Reversão</th></tr><tr *ngFor="let r of forecast.dezenas"><td>{{r.rank}}</td><td>{{r.value}}</td><td>{{r.score}}</td><td>{{r.continuity}}</td><td>{{r.delay}}</td><td>{{r.reversal}}</td></tr></table><p class="warn">Score é ranking heurístico, não probabilidade matemática.</p></div>
+<div *ngIf="backtest" class="card"><h3>Backtest</h3><p>Testes: <b>{{backtest.tests}}</b> | Acertos: <b>{{backtest.hits}}</b> | Taxa observada: <b>{{backtest.hitRate}}%</b></p></div><div *ngIf="ai" class="card"><h3>Análise da IA</h3><pre>{{ai}}</pre></div></section>
+</main>

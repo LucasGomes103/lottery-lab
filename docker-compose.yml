@@ -1,0 +1,18 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment: { POSTGRES_DB: lotterylab, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
+    ports: ["5432:5432"]
+    volumes: ["pg:/var/lib/postgresql/data", "./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql"]
+  api:
+    build: ./backend/LotteryLab.Api
+    environment:
+      ConnectionStrings__Default: Host=db;Port=5432;Database=lotterylab;Username=postgres;Password=postgres
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports: ["8080:8080"]
+    depends_on: [db]
+  web:
+    build: ./frontend
+    ports: ["4200:80"]
+    depends_on: [api]
+volumes: { pg: {} }
