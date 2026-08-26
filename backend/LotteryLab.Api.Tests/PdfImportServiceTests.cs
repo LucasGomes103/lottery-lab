@@ -46,4 +46,48 @@ public sealed class PdfImportServiceTests
         Assert.Equal("060", extractions[1].Results[1].Centena);
         Assert.Equal("60", extractions[1].Results[1].Dezena);
     }
+
+    [Fact]
+    public void ParseText_DoesNotLeakResultsWhenFollowingHeaderWasMissed()
+    {
+        const string text = """
+            26/08/2026
+            LT NACIONAL 15HS
+            1: 0.110 G.03 BURRO
+            3: 7.198 G.25 VACA
+            6: 4.450 G.13 GALO
+            7: 052 G.13 GALO
+            1: 1.286 G.22 TIGRE
+            2: 0.060 G.15 JACARE
+            3: 2.017 G.05 CACHORRO
+            """;
+
+        var extraction = Assert.Single(service.ParseText(text));
+
+        Assert.Equal(new[] { 1, 3, 6, 7 }, extraction.Results.Select(x => x.Position));
+        Assert.Equal("0110", extraction.Results[0].Number);
+        Assert.DoesNotContain(extraction.Results, x => x.Number == "1286");
+    }
+
+    [Fact]
+    public void ParseText_DerivesGroupWhenOcrMissesPrintedGroup()
+    {
+        const string text = """
+            26/08/2026
+            LT NACIONAL 02HS
+            1: 8.149
+            2: 9.696 texto ilegível
+            3: 3.305 GALO
+            4: 5.275 G19
+            5: 6.229
+            6: 2.654
+            7: 012
+            """;
+
+        var extraction = Assert.Single(service.ParseText(text));
+
+        Assert.Equal(7, extraction.Results.Count);
+        Assert.Equal(13, extraction.Results[0].Group);
+        Assert.Equal("GALO", extraction.Results[0].Animal);
+    }
 }

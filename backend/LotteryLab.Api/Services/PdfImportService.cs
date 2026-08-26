@@ -12,7 +12,7 @@ public sealed class PdfImportService(IConfiguration configuration, ILogger<PdfIm
 {
     private static readonly Regex DateRx = new(@"\b(?<d>\d{2}/\d{2}/\d{4})\b", RegexOptions.Compiled);
     private static readonly Regex HeaderRx = new(@"(?im)^\s*[>›»]?\s*(?<bank>LT\s+NACIONAL)\s+(?<h>\d{1,2})\s*H(?:S)?\s*$", RegexOptions.Compiled);
-    private static readonly Regex ResultRx = new(@"(?im)^\s*(?<p>[1-7])\s*[:\-]\s*(?<n>\d{1,2}(?:[\.\s]\d{3})|\d{1,4})\s+G\s*\.?\s*(?<g>\d{1,2})(?:\s+(?<animal>[A-ZÁÉÍÓÚÃÕÇ]+))?\s*$", RegexOptions.Compiled);
+    private static readonly Regex ResultRx = new(@"(?im)^\s*(?<p>[1-7])\s*[:.\-]?\s*(?<n>\d{1,2}(?:[\. ]\d{3})|\d{3,4})\b.*$", RegexOptions.Compiled);
     private static readonly string[] Animals = ["AVESTRUZ", "AGUIA", "BURRO", "BORBOLETA", "CACHORRO", "CABRA", "CARNEIRO", "CAMELO", "COBRA", "COELHO", "CAVALO", "ELEFANTE", "GALO", "GATO", "JACARE", "LEAO", "MACACO", "PORCO", "PAVAO", "PERU", "TOURO", "TIGRE", "URSO", "VEADO", "VACA"];
 
     public async Task<ImportPreview> ParseAsync(Stream stream, string fileName, CancellationToken cancellationToken)
@@ -72,6 +72,7 @@ public sealed class PdfImportService(IConfiguration configuration, ILogger<PdfIm
         foreach (Match match in ResultRx.Matches(block))
         {
             var position = int.Parse(match.Groups["p"].Value, CultureInfo.InvariantCulture);
+            if (results.Count > 0 && (results.Any(x => x.Position == position) || position < results[^1].Position)) break;
             var digits = new string(match.Groups["n"].Value.Where(char.IsDigit).ToArray());
             var expectedLength = position == 7 ? 3 : 4;
             if (digits.Length > expectedLength) digits = digits[^expectedLength..];
@@ -139,7 +140,7 @@ public sealed class PdfImportService(IConfiguration configuration, ILogger<PdfIm
         try
         {
             var pdftoppm = configuration["Ocr:PdftoppmPath"] ?? "pdftoppm";
-            await RunProcessAsync(pdftoppm, ["-png", "-gray", "-r", "300", pdfPath, pagePrefix], cancellationToken);
+            await RunProcessAsync(pdftoppm, ["-png", "-gray", "-r", "220", pdfPath, pagePrefix], cancellationToken);
             var pages = Directory.GetFiles(tempRoot, "page-*.png").OrderBy(NaturalPageOrder).ToList();
             if (pages.Count == 0) throw new InvalidOperationException("O renderizador não gerou imagens para o OCR.");
 
@@ -152,6 +153,11 @@ public sealed class PdfImportService(IConfiguration configuration, ILogger<PdfIm
                 foreach (var page in pages)
                     output.AppendLine(await RunProcessAsync(tesseract, [page, "stdout", "-l", language, "--psm", segmentationMode, "-c", "preserve_interword_spaces=1"], cancellationToken));
                 outputs.Add(output.ToString());
+                if (outputs.Count >= 2)
+                {
+                    var merged = MergeOcrExtractions(outputs.Select(ParseText));
+                    if (merged.Count > 0 && merged.All(x => x.Results.Count == 7)) break;
+                }
             }
             return outputs;
         }
