@@ -38,6 +38,24 @@ export class AppComponent {
         });
     }
 
+    startManualImport() {
+        const now = new Date();
+        const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        this.preview = {
+            fileName: `insercao-manual-${localDate}`,
+            sourceHash: `manual-${Date.now()}`,
+            usedOcr: false,
+            warnings: ['Preenchimento manual: confira todos os horários e resultados antes de confirmar.'],
+            extractions: [{
+                bank: 'LT NACIONAL', date: localDate, time: null,
+                results: Array.from({ length: 7 }, (_, index) => this.emptyResult(index + 1)),
+                warnings: ['Informe o horário e os sete resultados.']
+            }]
+        };
+        this.error = '';
+        this.message = '';
+    }
+
     normalize(result: ParsedResult) {
         const length = result.position === 7 ? 3 : 4;
         const digits = result.number.replace(/\D/g, '');

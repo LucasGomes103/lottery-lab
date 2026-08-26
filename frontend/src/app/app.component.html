@@ -6,7 +6,7 @@
   <section>
     <h2>1. Importar resultados</h2>
     <p class="muted">Envie um PDF com texto ou imagem. Nada será salvo antes da sua confirmação.</p>
-    <input type="file" accept="application/pdf,.pdf" (change)="select($event)" [disabled]="loading">
+    <div class="upload-actions"><input type="file" accept="application/pdf,.pdf" (change)="select($event)" [disabled]="loading"><button type="button" class="secondary" (click)="startManualImport()" [disabled]="loading">Inserir manualmente</button></div>
     <span *ngIf="loading" class="loading"> Renderizando e lendo o PDF por OCR...</span>
 
     <div *ngIf="preview" class="card">
