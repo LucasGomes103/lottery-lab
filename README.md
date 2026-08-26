@@ -9,6 +9,7 @@ MVP completo para importar resultados de PDFs, persistir o histórico, calcular 
 - .NET 8 Web API + Dapper
 - PostgreSQL
 - PdfPig para PDFs com texto selecionável
+- Poppler + Tesseract OCR para PDFs compostos por imagens
 - OpenAI Responses API opcional
 
 ## Rodar localmente
@@ -38,7 +39,9 @@ Acesse:
 6. Opcional: use "Analisar com IA".
 
 ## PDFs escaneados
-A versão inicial usa PdfPig e funciona melhor quando o PDF contém texto real. PDF que é apenas uma imagem precisa de OCR. A arquitetura deixa o `PdfImportService` isolado para acrescentarmos OCR depois.
+O importador tenta primeiro a camada textual com PdfPig. Quando não encontra horários/resultados suficientes, renderiza as páginas com Poppler e executa Tesseract OCR automaticamente. O container do backend já instala `poppler-utils`, `tesseract-ocr` e o idioma português.
+
+Um arquivo pode gerar várias extrações independentes (por exemplo 02h, 08h, 10h, 12h, 15h e 17h). A API retorna todas no preview para revisão e somente grava após a confirmação. Uma chave já existente de banca + data + horário retorna HTTP 409 e não é sobrescrita.
 
 ## Banco
 Execute `database/schema.sql` no PostgreSQL de produção.
@@ -88,8 +91,8 @@ A API usa `POST /v1/responses`. A chave fica **somente no backend** via `OPENAI_
 A IA recebe resultados agregados do Forecast/Backtest. O banco continua sendo a fonte da verdade, portanto o histórico não depende de uma conversa específica do ChatGPT.
 
 ## Endpoints
-- `POST /api/imports/preview` — multipart PDF
-- `POST /api/imports/commit` — confirma a prévia
+- `POST /api/imports/preview` — multipart PDF, com fallback OCR e múltiplos horários
+- `POST /api/imports/commit` — confirma todas as extrações revisadas da prévia
 - `GET /api/history`
 - `GET /api/forecast?bank=LT%20NACIONAL&time=21:00&windowDays=15&top=10`
 - `GET /api/backtest?...`

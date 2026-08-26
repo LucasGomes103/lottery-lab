@@ -1,8 +1,47 @@
-<header><h1>Lottery Lab</h1><p>Importação, histórico, backtest e análise estatística</p></header>
+<header><h1>Lottery Lab</h1><p>Dados corretos, estatísticas verificáveis e previsões experimentais</p></header>
 <main>
-<section><h2>1. Importar PDF</h2><input type="file" accept="application/pdf" (change)="select($event)"><span *ngIf="loading"> Lendo...</span>
-<div *ngIf="preview" class="card"><b>{{preview.fileName}}</b> — {{preview.bank}} — {{preview.date}} {{preview.time}}<p>{{preview.results.length}} resultados reconhecidos.</p><table><tr><th>Pos.</th><th>Número</th><th>Dezena</th><th>Grupo</th><th>Animal</th></tr><tr *ngFor="let r of preview.results"><td>{{r.position}}</td><td>{{r.number}}</td><td>{{r.dezena}}</td><td>{{r.group}}</td><td>{{r.animal}}</td></tr></table><button (click)="commit()">Confirmar importação</button></div></section>
-<section><h2>2. Análise</h2><div class="filters"><label>Banca <input [(ngModel)]="bank"></label><label>Horário <input type="time" [(ngModel)]="time"></label><label>Janela <input type="number" [(ngModel)]="windowDays"></label><button (click)="analyze()">Calcular</button><button (click)="ask()">Analisar com IA</button></div>
-<div *ngIf="forecast" class="card"><h3>Ranking híbrido</h3><table><tr><th>#</th><th>Dezena</th><th>Score</th><th>Continuidade</th><th>Atraso</th><th>Reversão</th></tr><tr *ngFor="let r of forecast.dezenas"><td>{{r.rank}}</td><td>{{r.value}}</td><td>{{r.score}}</td><td>{{r.continuity}}</td><td>{{r.delay}}</td><td>{{r.reversal}}</td></tr></table><p class="warn">Score é ranking heurístico, não probabilidade matemática.</p></div>
-<div *ngIf="backtest" class="card"><h3>Backtest</h3><p>Testes: <b>{{backtest.tests}}</b> | Acertos: <b>{{backtest.hits}}</b> | Taxa observada: <b>{{backtest.hitRate}}%</b></p></div><div *ngIf="ai" class="card"><h3>Análise da IA</h3><pre>{{ai}}</pre></div></section>
+  <p *ngIf="message" class="notice success">{{message}}</p>
+  <p *ngIf="error" class="notice error">{{error}}</p>
+
+  <section>
+    <h2>1. Importar resultados</h2>
+    <p class="muted">Envie um PDF com texto ou imagem. Nada será salvo antes da sua confirmação.</p>
+    <input type="file" accept="application/pdf,.pdf" (change)="select($event)" [disabled]="loading">
+    <span *ngIf="loading" class="loading"> Renderizando e lendo o PDF por OCR...</span>
+
+    <div *ngIf="preview" class="card">
+      <div class="preview-head">
+        <div><strong>{{preview.fileName}}</strong><div class="muted">{{preview.extractions.length}} horários reconhecidos · {{preview.usedOcr ? 'OCR utilizado' : 'texto do PDF'}}</div></div>
+        <span class="badge" [class.review]="preview.warnings.length">{{preview.warnings.length ? 'Revisar' : 'Reconhecido'}}</span>
+      </div>
+      <p *ngFor="let warning of preview.warnings" class="warn">{{warning}}</p>
+
+      <article *ngFor="let extraction of preview.extractions" class="extraction">
+        <div class="extraction-fields">
+          <label>Banca <input [(ngModel)]="extraction.bank"></label>
+          <label>Data <input type="date" [(ngModel)]="extraction.date"></label>
+          <label>Horário <input type="time" [(ngModel)]="extraction.time"></label>
+        </div>
+        <p *ngFor="let warning of extraction.warnings" class="warn">{{warning}}</p>
+        <table>
+          <thead><tr><th>Pos.</th><th>Número</th><th>Milhar</th><th>Centena</th><th>Dezena</th><th>Grupo</th><th>Animal</th></tr></thead>
+          <tbody><tr *ngFor="let result of extraction.results">
+            <td>{{result.position}}</td>
+            <td><input class="number" [(ngModel)]="result.number" (blur)="normalize(result)" inputmode="numeric"></td>
+            <td>{{result.milhar || '—'}}</td><td>{{result.centena}}</td><td>{{result.dezena}}</td>
+            <td>G.{{result.group?.toString()?.padStart(2, '0')}}</td><td>{{result.animal}}</td>
+          </tr></tbody>
+        </table>
+      </article>
+      <div class="actions"><button (click)="commit()" [disabled]="committing || !preview.extractions.length">{{committing ? 'Importando...' : 'Confirmar todas as extrações'}}</button></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Análise experimental</h2>
+    <div class="filters"><label>Banca <input [(ngModel)]="bank"></label><label>Horário <input type="time" [(ngModel)]="time"></label><label>Janela em dias <input type="number" min="1" [(ngModel)]="windowDays"></label><button (click)="analyze()">Calcular</button><button class="secondary" (click)="ask()">Explicar com IA</button></div>
+    <div *ngIf="forecast" class="card"><h3>Ranking híbrido</h3><table><thead><tr><th>#</th><th>Dezena</th><th>Score</th><th>Continuidade</th><th>Atraso</th><th>Reversão</th></tr></thead><tbody><tr *ngFor="let result of forecast.dezenas"><td>{{result.rank}}</td><td>{{result.value}}</td><td>{{result.score}}</td><td>{{result.continuity}}</td><td>{{result.delay}}</td><td>{{result.reversal}}</td></tr></tbody></table><p class="warn">Score é um ranking heurístico, não uma probabilidade matemática.</p></div>
+    <div *ngIf="backtest" class="card"><h3>Backtest atual</h3><p>Testes: <strong>{{backtest.tests}}</strong> · Acertos: <strong>{{backtest.hits}}</strong> · Taxa observada: <strong>{{backtest.hitRate}}%</strong></p></div>
+    <div *ngIf="ai" class="card"><h3>Análise da IA</h3><pre>{{ai}}</pre></div>
+  </section>
 </main>

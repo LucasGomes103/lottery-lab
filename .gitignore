@@ -2,6 +2,7 @@
 **/obj/
 **/node_modules/
 **/dist/
+**/.angular/
 .env
 .vscode/
 .idea/
