@@ -5,3 +5,12 @@
 .env
 .vscode/
 .idea/
+
+.vs/
+**/.vs/
+
+bin/
+obj/
+
+*.user
+*.suo
