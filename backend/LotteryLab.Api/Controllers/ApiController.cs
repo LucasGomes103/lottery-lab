@@ -8,7 +8,7 @@ namespace LotteryLab.Api.Controllers;
 
 [ApiController]
 [Route("api")]
-public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService analysis, AiService ai) : ControllerBase
+public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService analysis, AiService ai, NumberGeneratorService generator) : ControllerBase
 {
     [HttpPost("imports/preview")]
     [RequestSizeLimit(20_000_000)]
@@ -235,6 +235,20 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     [HttpGet("forecast")]
     public async Task<IActionResult> Forecast(string bank = "LT NACIONAL", string time = "21:00", int windowDays = 15, int top = 8) =>
         Ok(await analysis.Forecast(bank, time, Math.Clamp(windowDays, 1, 3650), Math.Clamp(top, 1, 100)));
+
+    [HttpGet("generator")]
+    public async Task<IActionResult> GenerateNumbers(
+        string bank = "LT NACIONAL",
+        string time = "21:00",
+        DateOnly? targetDate = null,
+        int windowDays = 90,
+        int quantity = 10)
+    {
+        if (string.IsNullOrWhiteSpace(bank)) return BadRequest(new { message = "Informe a banca." });
+        if (!TimeOnly.TryParse(time, out _)) return BadRequest(new { message = "Horário inválido." });
+        var date = targetDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
+        return Ok(await generator.Generate(bank.Trim(), time, date, Math.Clamp(windowDays, 7, 3650), Math.Clamp(quantity, 1, 100)));
+    }
 
     [HttpGet("backtest")]
     public async Task<IActionResult> Backtest(string bank = "LT NACIONAL", string time = "21:00", int windowDays = 15, int top = 8) =>

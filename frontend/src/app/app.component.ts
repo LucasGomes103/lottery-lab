@@ -10,6 +10,8 @@ interface ImportPreview { fileName: string; sourceHash: string; usedOcr: boolean
 interface HistoryItem { id: number; bank: string; extraction_date: string; extraction_time: string; results: number; }
 interface HistoryResponse { items: HistoryItem[]; total: number; page: number; pageSize: number; totalPages: number; }
 interface ImportQueueItem { id: number; file?: File; fileName: string; status: 'waiting' | 'processing' | 'ready' | 'imported' | 'error'; preview?: ImportPreview; error?: string; }
+interface GeneratedNumber { rank: number; milhar: string; centena: string; dezena: string; score: number; milharSignal: number; centenaSignal: number; dezenaSignal: number; digitSignal: number; }
+interface GenerationResponse { algorithm: string; bank: string; time: string; targetDate: string; windowDays: number; sampleExtractions: number; sampleResults: number; robustness: string; numbers: GeneratedNumber[]; baseline: any; warning: string; }
 
 @Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule], templateUrl: './app.component.html' })
 export class AppComponent implements OnInit {
@@ -43,6 +45,11 @@ export class AppComponent implements OnInit {
     bank = 'LT NACIONAL';
     time = '21:00';
     windowDays = 15;
+    generationDate = this.localDate();
+    generationQuantity = 10;
+    generationWindowDays = 90;
+    generation: GenerationResponse | null = null;
+    generating = false;
 
     ngOnInit() { this.loadHistory(1); }
 
@@ -263,6 +270,16 @@ export class AppComponent implements OnInit {
         this.http.get(this.api + `/backtest?bank=${encodeURIComponent(this.bank)}&time=${this.time}&windowDays=${this.windowDays}&top=10`).subscribe(x => this.backtest = x);
     }
 
+    generateNumbers() {
+        this.generating = true;
+        this.error = '';
+        const params = new URLSearchParams({ bank: this.bank, time: this.time, targetDate: this.generationDate, windowDays: String(this.generationWindowDays), quantity: String(this.generationQuantity) });
+        this.http.get<GenerationResponse>(this.api + `/generator?${params}`).subscribe({
+            next: response => { this.generation = response; this.generating = false; },
+            error: error => { this.error = this.errorMessage(error); this.generating = false; }
+        });
+    }
+
     ask() {
         this.ai = 'Analisando...';
         this.http.post<any>(this.api + '/ai/analyze', { bank: this.bank, time: this.time, windowDays: this.windowDays, question: 'Compare continuidade, atraso, reversão e o ranking híbrido com base nos dados disponíveis.' }).subscribe(x => this.ai = x.answer);
@@ -287,5 +304,10 @@ export class AppComponent implements OnInit {
 
     private emptyResult(position: number): ParsedResult {
         return { position, number: '', milhar: null, centena: null, dezena: null, group: null, animal: null };
+    }
+
+    private localDate() {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     }
 }

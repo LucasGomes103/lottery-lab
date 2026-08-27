@@ -10,6 +10,7 @@ builder.Services.AddSingleton<Db>();
 builder.Services.AddScoped<PdfImportService>();
 builder.Services.AddScoped<AnalysisService>();
 builder.Services.AddScoped<AiService>();
+builder.Services.AddScoped<NumberGeneratorService>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ??
     ["https://lottery-lab.gomeslucas103.workers.dev", "http://localhost:4200"];
 builder.Services.AddCors(o => o.AddPolicy("web", p => p.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
