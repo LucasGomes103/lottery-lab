@@ -33,7 +33,12 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         if (validationErrors.Count > 0) return BadRequest(new { message = "Revise os dados antes de importar.", errors = validationErrors });
 
         await using var connection = db.Open();
-        var keys = preview.Extractions.Select(x => new { x.Bank, Date = x.Date!.Value, Time = x.Time! }).ToList();
+        var keys = preview.Extractions.Select(x => new
+        {
+            x.Bank,
+            Date = x.Date!.Value.ToDateTime(TimeOnly.MinValue),
+            Time = x.Time!
+        }).ToList();
         var duplicates = new List<object>();
         foreach (var key in keys)
         {
@@ -50,7 +55,13 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
             var id = await connection.ExecuteScalarAsync<long>(
                 @"insert into extractions(bank,extraction_date,extraction_time,source_file)
                   values(@Bank,@Date,@Time::time,@FileName) returning id",
-                new { extraction.Bank, Date = extraction.Date!.Value, extraction.Time, preview.FileName }, transaction);
+                new
+                {
+                    extraction.Bank,
+                    Date = extraction.Date!.Value.ToDateTime(TimeOnly.MinValue),
+                    extraction.Time,
+                    preview.FileName
+                }, transaction);
 
             foreach (var result in extraction.Results)
             {
