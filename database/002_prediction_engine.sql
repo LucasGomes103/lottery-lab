@@ -24,9 +24,14 @@ create table if not exists prediction_evaluations (
   prediction_id uuid primary key references predictions(id) on delete cascade,
   extraction_id bigint not null references extractions(id), evaluated_at timestamptz not null default now(),
   hit_milhar boolean not null, hit_centena boolean not null, hit_dezena boolean not null,
+  milhar_hit_count integer not null default 0, centena_hit_count integer not null default 0,
+  dezena_hit_count integer not null default 0,
   best_milhar_position integer, best_centena_position integer, best_dezena_position integer,
   details jsonb not null
 );
 create index if not exists ix_predictions_target on predictions(bank,target_date desc,target_time);
 create index if not exists ix_predictions_status on predictions(status,bank,target_date,target_time);
 create index if not exists ix_prediction_candidates_suffixes on prediction_candidates(milhar,centena,dezena);
+alter table prediction_evaluations add column if not exists milhar_hit_count integer not null default 0;
+alter table prediction_evaluations add column if not exists centena_hit_count integer not null default 0;
+alter table prediction_evaluations add column if not exists dezena_hit_count integer not null default 0;

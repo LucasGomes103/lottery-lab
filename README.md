@@ -108,6 +108,8 @@ A IA recebe resultados agregados do Forecast/Backtest. O banco continua sendo a 
 - `POST /api/predictions/generate` — gera e persiste uma previsão auditável
 - `GET /api/predictions` — histórico paginado de previsões e avaliações
 - `GET /api/predictions/{id}` — candidatos, features e avaliação de uma execução
+- `POST /api/predictions/{id}/evaluate` — força nova conferência contra o resultado importado
+- `GET /api/predictions/statistics` — indicadores de acertos para o dashboard
 - `POST /api/ai/analyze`
 - `GET /health`
 

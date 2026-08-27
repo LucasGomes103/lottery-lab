@@ -297,6 +297,22 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         return result is null ? NotFound(new { message = "Previsão não encontrada." }) : Ok(result);
     }
 
+    [HttpGet("predictions/statistics")]
+    public async Task<IActionResult> PredictionStatistics(string? bank = null, DateOnly? startDate = null,
+        DateOnly? endDate = null, string? time = null)
+    {
+        if (!string.IsNullOrWhiteSpace(time) && !TimeOnly.TryParse(time, out _))
+            return BadRequest(new { message = "Horário de filtro inválido." });
+        return Ok(await predictions.Statistics(bank, startDate, endDate, time));
+    }
+
+    [HttpPost("predictions/{id:guid}/evaluate")]
+    public async Task<IActionResult> EvaluatePrediction(Guid id)
+    {
+        var result = await predictions.Evaluate(id);
+        return result is null ? NotFound(new { message = "Previsão não encontrada." }) : Ok(result);
+    }
+
     [HttpDelete("predictions/{id:guid}")]
     public async Task<IActionResult> DeletePrediction(Guid id)
     {

@@ -33,7 +33,7 @@ export class AppComponent implements OnInit {
     editingIds: number[] = [];
     selectedHistoryIds = new Set<number>();
     history: HistoryItem[] = [];
-    activeSection: 'import' | 'history' | 'analysis' | 'predictions' = 'import';
+    activeSection: 'import' | 'history' | 'analysis' | 'predictions' | 'dashboard' = 'import';
     historyBank = 'LT NACIONAL';
     historyStartDate = '';
     historyEndDate = '';
@@ -62,16 +62,23 @@ export class AppComponent implements OnInit {
     predictionTotal = 0;
     predictionTotalPages = 1;
     selectedPredictionIds = new Set<string>();
+    dashboard: any = null;
+    loadingDashboard = false;
+    dashboardBank = 'LT NACIONAL';
+    dashboardStartDate = '';
+    dashboardEndDate = '';
+    dashboardTime = '';
     generating = false;
 
     ngOnInit() { this.loadHistory(1); }
 
-    navigate(section: 'import' | 'history' | 'analysis' | 'predictions') {
+    navigate(section: 'import' | 'history' | 'analysis' | 'predictions' | 'dashboard') {
         this.activeSection = section;
         this.error = '';
         this.message = '';
         if (section === 'history') this.loadHistory(this.historyPage);
         if (section === 'predictions') this.loadPredictionHistory(this.predictionPage);
+        if (section === 'dashboard') this.loadDashboard();
     }
 
     select(event: Event) {
@@ -350,11 +357,49 @@ export class AppComponent implements OnInit {
         });
     }
 
+    loadDashboard() {
+        this.loadingDashboard = true;
+        const params = new URLSearchParams();
+        if (this.dashboardBank.trim()) params.set('bank', this.dashboardBank.trim());
+        if (this.dashboardStartDate) params.set('startDate', this.dashboardStartDate);
+        if (this.dashboardEndDate) params.set('endDate', this.dashboardEndDate);
+        if (this.dashboardTime) params.set('time', this.dashboardTime);
+        this.http.get<any>(this.api + `/predictions/statistics?${params}`).subscribe({
+            next: response => { this.dashboard = response; this.loadingDashboard = false; },
+            error: error => { this.error = this.errorMessage(error); this.loadingDashboard = false; }
+        });
+    }
+
+    clearDashboardFilters() {
+        this.dashboardBank = '';
+        this.dashboardStartDate = '';
+        this.dashboardEndDate = '';
+        this.dashboardTime = '';
+        this.loadDashboard();
+    }
+
+    hitRate(hitPredictions: number, evaluated: number) {
+        return evaluated ? (100 * hitPredictions / evaluated).toFixed(1) : '0.0';
+    }
+
     viewPrediction(id: string) {
         this.loadingPrediction = true;
         this.selectedPrediction = null;
         this.http.get<any>(this.api + `/predictions/${id}`).subscribe({
             next: response => { this.selectedPrediction = response; this.loadingPrediction = false; },
+            error: error => { this.error = this.errorMessage(error); this.loadingPrediction = false; }
+        });
+    }
+
+    verifyPrediction(id: string) {
+        this.loadingPrediction = true;
+        this.http.post<any>(this.api + `/predictions/${id}/evaluate`, {}).subscribe({
+            next: response => {
+                this.selectedPrediction = response;
+                this.loadingPrediction = false;
+                this.message = response.evaluation ? 'Previsão conferida com o resultado existente na base.' : 'O resultado desse horário ainda não foi importado.';
+                this.loadPredictionHistory(this.predictionPage);
+            },
             error: error => { this.error = this.errorMessage(error); this.loadingPrediction = false; }
         });
     }

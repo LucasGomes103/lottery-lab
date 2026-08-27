@@ -19,7 +19,9 @@ public sealed class PredictionService(Db db)
     private sealed record StoredCandidate(int Rank, string Milhar, string Centena, string Dezena, int Group,
         string SelectionType, double StatisticalScore, double FinalScore, string FeaturesJson, string ReasonsJson);
     private sealed record EvaluationRow(long ExtractionId, bool HitMilhar, bool HitCentena, bool HitDezena,
+        int MilharHitCount, int CentenaHitCount, int DezenaHitCount,
         int? BestMilharPosition, int? BestCentenaPosition, int? BestDezenaPosition, DateTime EvaluatedAt);
+    private sealed record PredictionTarget(string Bank, DateTime TargetDate, TimeSpan TargetTime);
 
     public async Task<PredictionResponse> GenerateAndSave(PredictionRequest request)
     {
@@ -103,7 +105,8 @@ public sealed class PredictionService(Db db)
         var total = await connection.ExecuteScalarAsync<long>($"select count(*) from predictions p {filter}", args);
         var items = await connection.QueryAsync($@"select p.id,p.bank,p.target_date,p.target_time,p.algorithm_code,
             p.algorithm_version,p.quantity,p.robustness,p.status,p.generated_at,
-            pe.hit_milhar,pe.hit_centena,pe.hit_dezena
+            pe.hit_milhar,pe.hit_centena,pe.hit_dezena,
+            pe.milhar_hit_count,pe.centena_hit_count,pe.dezena_hit_count
             from predictions p left join prediction_evaluations pe on pe.prediction_id=p.id {filter}
             order by p.generated_at desc offset @offset limit @pageSize", args);
         return new { items, total, page, pageSize, totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize)) };
@@ -116,12 +119,15 @@ public sealed class PredictionService(Db db)
         if (prediction is null) return null;
         var candidates = (await connection.QueryAsync<StoredCandidate>(
             @"select rank,milhar,centena,dezena,group_no as ""Group"",selection_type as SelectionType,
-                     statistical_score as StatisticalScore,final_score as FinalScore,
+                     statistical_score::double precision as StatisticalScore,
+                     final_score::double precision as FinalScore,
                      features::text as FeaturesJson,reasons::text as ReasonsJson
               from prediction_candidates where prediction_id=@id order by rank", new { id })).ToList();
         var evaluation = await connection.QuerySingleOrDefaultAsync<EvaluationRow>(
             @"select extraction_id as ExtractionId,hit_milhar as HitMilhar,hit_centena as HitCentena,
-                     hit_dezena as HitDezena,best_milhar_position as BestMilharPosition,
+                     hit_dezena as HitDezena,milhar_hit_count as MilharHitCount,
+                     centena_hit_count as CentenaHitCount,dezena_hit_count as DezenaHitCount,
+                     best_milhar_position as BestMilharPosition,
                      best_centena_position as BestCentenaPosition,best_dezena_position as BestDezenaPosition,
                      evaluated_at as EvaluatedAt
               from prediction_evaluations where prediction_id=@id", new { id });
@@ -158,12 +164,68 @@ public sealed class PredictionService(Db db)
         };
     }
 
+    public async Task<object?> Evaluate(Guid id)
+    {
+        await using var connection = db.Open();
+        var target = await connection.QuerySingleOrDefaultAsync<PredictionTarget>(
+            @"select bank as Bank,target_date as TargetDate,target_time as TargetTime
+              from predictions where id=@id", new { id });
+        if (target is null) return null;
+        await EvaluatePending(target.Bank, DateOnly.FromDateTime(target.TargetDate),
+            $"{target.TargetTime.Hours:00}:{target.TargetTime.Minutes:00}");
+        return await Detail(id);
+    }
+
     public async Task<int> Delete(IEnumerable<Guid> ids)
     {
         var uniqueIds = ids.Distinct().ToArray();
         if (uniqueIds.Length == 0) return 0;
         await using var connection = db.Open();
         return await connection.ExecuteAsync("delete from predictions where id=any(@ids)", new { ids = uniqueIds });
+    }
+
+    public async Task<object> Statistics(string? bank, DateOnly? startDate, DateOnly? endDate, string? time)
+    {
+        await using var connection = db.Open();
+        var where = new List<string>();
+        var args = new DynamicParameters();
+        if (!string.IsNullOrWhiteSpace(bank)) { where.Add("p.bank ilike @bank"); args.Add("bank", $"%{bank.Trim()}%"); }
+        if (startDate is not null) { where.Add("p.target_date>=@startDate"); args.Add("startDate", startDate.Value.ToDateTime(TimeOnly.MinValue)); }
+        if (endDate is not null) { where.Add("p.target_date<=@endDate"); args.Add("endDate", endDate.Value.ToDateTime(TimeOnly.MinValue)); }
+        if (!string.IsNullOrWhiteSpace(time)) { where.Add("p.target_time=@time::time"); args.Add("time", time); }
+        var filter = where.Count == 0 ? "" : "where " + string.Join(" and ", where);
+        var evaluatedFilter = where.Count == 0 ? "where pe.prediction_id is not null" : filter + " and pe.prediction_id is not null";
+
+        var totals = await connection.QuerySingleAsync($@"
+            select count(*)::int as total_predictions,
+                   count(*) filter(where pe.prediction_id is null)::int as pending_predictions,
+                   count(pe.prediction_id)::int as evaluated_predictions,
+                   count(*) filter(where pe.hit_milhar)::int as predictions_with_milhar_hit,
+                   count(*) filter(where pe.hit_centena)::int as predictions_with_centena_hit,
+                   count(*) filter(where pe.hit_dezena)::int as predictions_with_dezena_hit,
+                   coalesce(sum(pe.milhar_hit_count),0)::int as milhar_hits,
+                   coalesce(sum(pe.centena_hit_count),0)::int as centena_hits,
+                   coalesce(sum(pe.dezena_hit_count),0)::int as dezena_hits,
+                   coalesce(sum(p.quantity) filter(where pe.prediction_id is not null),0)::int as evaluated_candidates
+            from predictions p left join prediction_evaluations pe on pe.prediction_id=p.id {filter}", args);
+        var byTime = await connection.QueryAsync($@"
+            select p.target_time, count(*)::int as evaluated_predictions,
+                   count(*) filter(where pe.hit_milhar)::int as predictions_with_milhar_hit,
+                   count(*) filter(where pe.hit_centena)::int as predictions_with_centena_hit,
+                   count(*) filter(where pe.hit_dezena)::int as predictions_with_dezena_hit,
+                   coalesce(sum(pe.milhar_hit_count),0)::int as milhar_hits,
+                   coalesce(sum(pe.centena_hit_count),0)::int as centena_hits,
+                   coalesce(sum(pe.dezena_hit_count),0)::int as dezena_hits
+            from predictions p join prediction_evaluations pe on pe.prediction_id=p.id {evaluatedFilter}
+            group by p.target_time order by p.target_time", args);
+        var byDate = await connection.QueryAsync($@"
+            select p.target_date, count(*)::int as evaluated_predictions,
+                   coalesce(sum(pe.milhar_hit_count),0)::int as milhar_hits,
+                   coalesce(sum(pe.centena_hit_count),0)::int as centena_hits,
+                   coalesce(sum(pe.dezena_hit_count),0)::int as dezena_hits
+            from predictions p join prediction_evaluations pe on pe.prediction_id=p.id {evaluatedFilter}
+            group by p.target_date order by p.target_date desc limit 30", args);
+        return new { totals, byTime, byDate };
     }
 
     public async Task EvaluatePending(string bank, DateOnly date, string time)
@@ -185,19 +247,27 @@ public sealed class PredictionService(Db db)
             int? milharPos = actual.Where(a => candidates.Any(c => c.Milhar == a.Number)).Select(a => (int?)a.Position).Min();
             int? centenaPos = actual.Where(a => candidates.Any(c => c.Centena == a.Number[^3..])).Select(a => (int?)a.Position).Min();
             int? dezenaPos = actual.Where(a => candidates.Any(c => c.Dezena == a.Number[^2..])).Select(a => (int?)a.Position).Min();
+            var milharHitCount = candidates.Sum(c => actual.Count(a => c.Milhar == a.Number));
+            var centenaHitCount = candidates.Sum(c => actual.Count(a => c.Centena == a.Number[^3..]));
+            var dezenaHitCount = candidates.Sum(c => actual.Count(a => c.Dezena == a.Number[^2..]));
             var details = JsonSerializer.Serialize(new { actual = actual.Select(x => x.Number) }, JsonOptions);
             await connection.ExecuteAsync(
                 @"insert into prediction_evaluations(prediction_id,extraction_id,hit_milhar,hit_centena,hit_dezena,
+                    milhar_hit_count,centena_hit_count,dezena_hit_count,
                     best_milhar_position,best_centena_position,best_dezena_position,details)
-                  values(@predictionId,@extraction,@hitMilhar,@hitCentena,@hitDezena,@milharPos,@centenaPos,@dezenaPos,@details::jsonb)
+                  values(@predictionId,@extraction,@hitMilhar,@hitCentena,@hitDezena,
+                    @milharHitCount,@centenaHitCount,@dezenaHitCount,@milharPos,@centenaPos,@dezenaPos,@details::jsonb)
                   on conflict(prediction_id) do update set
                     extraction_id=excluded.extraction_id,evaluated_at=now(),
                     hit_milhar=excluded.hit_milhar,hit_centena=excluded.hit_centena,hit_dezena=excluded.hit_dezena,
+                    milhar_hit_count=excluded.milhar_hit_count,centena_hit_count=excluded.centena_hit_count,
+                    dezena_hit_count=excluded.dezena_hit_count,
                     best_milhar_position=excluded.best_milhar_position,best_centena_position=excluded.best_centena_position,
                     best_dezena_position=excluded.best_dezena_position,details=excluded.details;
                   update predictions set status='EVALUATED' where id=@predictionId",
                 new { predictionId, extraction, hitMilhar = milharPos is not null, hitCentena = centenaPos is not null,
-                    hitDezena = dezenaPos is not null, milharPos, centenaPos, dezenaPos, details });
+                    hitDezena = dezenaPos is not null, milharHitCount, centenaHitCount, dezenaHitCount,
+                    milharPos, centenaPos, dezenaPos, details });
         }
     }
 
