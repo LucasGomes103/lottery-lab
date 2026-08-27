@@ -11,6 +11,7 @@ namespace LotteryLab.Api.Services;
 public sealed class PdfImportService(IConfiguration configuration, ILogger<PdfImportService> logger)
 {
     private static readonly Regex DateRx = new(@"\b(?<d>\d{2}/\d{2}/\d{4})\b", RegexOptions.Compiled);
+    private static readonly Regex ResultsDateRx = new(@"(?is)\bRESULTADOS\b[^\d]{0,100}(?<d>\d{2}/\d{2}/\d{4})", RegexOptions.Compiled);
     private static readonly Regex HeaderRx = new(@"(?im)^\s*[>›»]?\s*(?<bank>LT\s+NACIONAL)\s+(?<h>\d{1,2})\s*H(?:S)?\s*$", RegexOptions.Compiled);
     private static readonly Regex ResultRx = new(@"(?im)^\s*(?<p>[1-7])\s*[:.\-]?\s*(?<n>\d{1,2}(?:[\. ]\d{3})|\d{3,4})\b.*$", RegexOptions.Compiled);
     private static readonly string[] Animals = ["AVESTRUZ", "AGUIA", "BURRO", "BORBOLETA", "CACHORRO", "CABRA", "CARNEIRO", "CAMELO", "COBRA", "COELHO", "CAVALO", "ELEFANTE", "GALO", "GATO", "JACARE", "LEAO", "MACACO", "PORCO", "PAVAO", "PERU", "TOURO", "TIGRE", "URSO", "VEADO", "VACA"];
@@ -45,7 +46,8 @@ public sealed class PdfImportService(IConfiguration configuration, ILogger<PdfIm
     public List<ParsedExtraction> ParseText(string rawText)
     {
         var text = NormalizeOcrText(rawText);
-        var dateMatch = DateRx.Match(text);
+        var dateMatch = ResultsDateRx.Match(text);
+        if (!dateMatch.Success) dateMatch = DateRx.Matches(text).Cast<Match>().LastOrDefault() ?? Match.Empty;
         DateOnly? date = dateMatch.Success && DateOnly.TryParseExact(dateMatch.Groups["d"].Value, "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate) ? parsedDate : null;
         var headers = HeaderRx.Matches(text).Cast<Match>().ToList();
         var extractions = new List<ParsedExtraction>();

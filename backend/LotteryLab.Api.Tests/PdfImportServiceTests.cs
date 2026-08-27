@@ -90,4 +90,27 @@ public sealed class PdfImportServiceTests
         Assert.Equal(13, extraction.Results[0].Group);
         Assert.Equal("GALO", extraction.Results[0].Animal);
     }
+
+    [Fact]
+    public void ParseText_PrefersGameDateAfterResultadosOverExportTimestamp()
+    {
+        const string text = """
+            VENDEDOR: 1504255
+            26/08/2026 19:16:15
+            RESULTADOS        25/08/2026
+            LT NACIONAL 02HS
+            1: 6.736 G.09 COBRA
+            2: 1.970 G.18 PORCO
+            3: 4.436 G.09 COBRA
+            4: 6.494 G.24 VEADO
+            5: 1.901 G.01 AVESTRUZ
+            6: 1.537 G.10 COELHO
+            7: 269 G.18 PORCO
+            """;
+
+        var extraction = Assert.Single(service.ParseText(text));
+
+        Assert.Equal(new DateOnly(2026, 8, 25), extraction.Date);
+        Assert.Equal(7, extraction.Results.Count);
+    }
 }
