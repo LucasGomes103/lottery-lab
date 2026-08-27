@@ -414,6 +414,79 @@ export class AppComponent implements OnInit {
         return matches?.map(match => `${match.position}º: ${match.number}`).join(', ') || '';
     }
 
+    exportGeneratedPrediction() {
+        if (!this.generation) return;
+        this.downloadPredictionExcel({
+            prediction: {
+                id: this.generation.id, bank: this.generation.bank, target_date: this.generation.targetDate,
+                target_time: this.generation.time, algorithm_code: this.generation.algorithm,
+                algorithm_version: this.generation.algorithmVersion, quantity: this.generation.quantity,
+                generated_at: new Date().toISOString(), status: 'PENDING'
+            },
+            candidates: this.generation.numbers,
+            evaluation: null,
+            actualResults: []
+        });
+    }
+
+    exportSelectedPrediction() {
+        if (this.selectedPrediction) this.downloadPredictionExcel(this.selectedPrediction);
+    }
+
+    private downloadPredictionExcel(detail: any) {
+        const prediction = detail.prediction;
+        const evaluated = !!detail.evaluation;
+        const rows = (detail.candidates || []).map((candidate: any) => {
+            const hits = candidate.hits || {};
+            return [
+                candidate.rank, candidate.milhar, candidate.centena, candidate.dezena,
+                `G.${String(candidate.group).padStart(2, '0')}`, candidate.selectionType,
+                candidate.statisticalScore, candidate.finalScore, (candidate.reasons || []).join(' | '),
+                evaluated ? (hits.milhar ? 'SIM' : 'NÃO') : 'PENDENTE',
+                evaluated ? (hits.centena ? 'SIM' : 'NÃO') : 'PENDENTE',
+                evaluated ? (hits.dezena ? 'SIM' : 'NÃO') : 'PENDENTE',
+                this.matchLabel(hits.milharMatches || []), this.matchLabel(hits.centenaMatches || []),
+                this.matchLabel(hits.dezenaMatches || [])
+            ];
+        });
+        const headers = ['Rank', 'Milhar', 'Centena', 'Dezena', 'Grupo/Bicho', 'Estratégia',
+            'Score estatístico', 'Score final', 'Principais razões', 'Acertou milhar', 'Acertou centena',
+            'Acertou dezena', 'Resultados da milhar', 'Resultados da centena', 'Resultados da dezena'];
+        const metadata = [
+            ['ID da previsão', prediction.id], ['Banca', prediction.bank],
+            ['Data alvo', String(prediction.target_date).slice(0, 10)], ['Horário alvo', String(prediction.target_time).slice(0, 5)],
+            ['Algoritmo', `${prediction.algorithm_code} V${prediction.algorithm_version}`],
+            ['Quantidade', prediction.quantity], ['Situação', evaluated ? 'CONFERIDA' : 'AGUARDANDO RESULTADO'],
+            ['Gerada em', prediction.generated_at || '']
+        ];
+        const cell = (value: any, style = '') => {
+            const numeric = typeof value === 'number';
+            return `<Cell${style ? ` ss:StyleID="${style}"` : ''}><Data ss:Type="${numeric ? 'Number' : 'String'}">${this.xmlEscape(value ?? '')}</Data></Cell>`;
+        };
+        const metadataXml = metadata.map(row => `<Row>${cell(row[0], 'Label')}${cell(row[1])}</Row>`).join('');
+        const headerXml = `<Row>${headers.map(value => cell(value, 'Header')).join('')}</Row>`;
+        const dataXml = rows.map((row: any[]) => `<Row>${row.map(value => cell(value)).join('')}</Row>`).join('');
+        const actualXml = (detail.actualResults || []).map((actual: any) =>
+            `<Row>${cell(actual.position)}${cell(actual.number)}${cell(actual.centena)}${cell(actual.dezena)}${cell(`G.${String(actual.group).padStart(2, '0')}`)}</Row>`).join('');
+        const workbook = `<?xml version="1.0" encoding="UTF-8"?><?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+<Styles><Style ss:ID="Default"><Alignment ss:Vertical="Center"/><Font ss:FontName="Arial" ss:Size="10"/></Style><Style ss:ID="Header"><Font ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#111827" ss:Pattern="Solid"/></Style><Style ss:ID="Label"><Font ss:Bold="1"/><Interior ss:Color="#E5E7EB" ss:Pattern="Solid"/></Style></Styles>
+<Worksheet ss:Name="Previsão"><Table><Column ss:Width="110"/><Column ss:Width="130"/>${metadataXml}<Row/><Row>${cell('Números previstos', 'Header')}</Row>${headerXml}${dataXml}</Table></Worksheet>
+<Worksheet ss:Name="Resultados reais"><Table><Row>${['Posição','Milhar','Centena','Dezena','Grupo/Bicho'].map(value => cell(value, 'Header')).join('')}</Row>${actualXml}</Table></Worksheet>
+</Workbook>`;
+        const blob = new Blob(['\ufeff', workbook], { type: 'application/vnd.ms-excel;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `previsao-${String(prediction.target_date).slice(0, 10)}-${String(prediction.target_time).slice(0, 5).replace(':', 'h')}.xls`;
+        link.click();
+        URL.revokeObjectURL(url);
+    }
+
+    private xmlEscape(value: any) {
+        return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+    }
+
     ask() {
         this.ai = 'Analisando...';
         this.http.post<any>(this.api + '/ai/analyze', { bank: this.bank, time: this.time, windowDays: this.windowDays, question: 'Compare continuidade, atraso, reversão e o ranking híbrido com base nos dados disponíveis.' }).subscribe(x => this.ai = x.answer);
