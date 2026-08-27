@@ -176,6 +176,62 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         return Ok(new { id, message = "Extração atualizada com sucesso." });
     }
 
+    [HttpPut("history/batch")]
+    public async Task<IActionResult> UpdateHistoryBatch(BatchHistoryUpdate request)
+    {
+        if (request.Items.Count == 0) return BadRequest(new { message = "Selecione ao menos uma extração." });
+        if (request.Items.Select(x => x.Id).Distinct().Count() != request.Items.Count)
+            return BadRequest(new { message = "A seleção contém extrações repetidas." });
+
+        var errors = request.Items.SelectMany(item =>
+            Validate(new ImportPreview("edicao-em-lote", $"edit-{item.Id}", false, [item.Extraction], []))
+                .Select(error => $"Extração {item.Id}: {error}")).ToList();
+        if (errors.Count > 0) return BadRequest(new { message = "Revise os dados antes de salvar.", errors });
+
+        await using var connection = db.Open();
+        foreach (var item in request.Items)
+        {
+            var exists = await connection.ExecuteScalarAsync<bool>("select exists(select 1 from extractions where id=@Id)", new { item.Id });
+            if (!exists) return NotFound(new { message = $"Extração {item.Id} não encontrada." });
+            var duplicate = await connection.ExecuteScalarAsync<bool>(
+                @"select exists(select 1 from extractions
+                  where bank=@Bank and extraction_date=@Date and extraction_time=@Time::time and id<>@Id)",
+                new
+                {
+                    item.Id,
+                    item.Extraction.Bank,
+                    Date = item.Extraction.Date!.Value.ToDateTime(TimeOnly.MinValue),
+                    item.Extraction.Time
+                });
+            if (duplicate) return Conflict(new { message = $"Já existe outra extração para {item.Extraction.Bank}, {item.Extraction.Date} e {item.Extraction.Time}." });
+        }
+
+        await using var transaction = await connection.BeginTransactionAsync();
+        foreach (var item in request.Items)
+        {
+            await connection.ExecuteAsync(
+                @"update extractions set bank=@Bank, extraction_date=@Date, extraction_time=@Time::time where id=@Id",
+                new
+                {
+                    item.Id,
+                    item.Extraction.Bank,
+                    Date = item.Extraction.Date!.Value.ToDateTime(TimeOnly.MinValue),
+                    item.Extraction.Time
+                }, transaction);
+            await connection.ExecuteAsync("delete from results where extraction_id=@Id", new { item.Id }, transaction);
+            foreach (var result in item.Extraction.Results)
+            {
+                var normalized = NormalizeResult(result);
+                await connection.ExecuteAsync(
+                    @"insert into results(extraction_id,position,number,centena,dezena,group_no,animal)
+                      values(@Id,@Position,@Number,@Centena,@Dezena,@Group,@Animal)",
+                    new { item.Id, normalized.Position, normalized.Number, normalized.Centena, normalized.Dezena, Group = normalized.Group, normalized.Animal }, transaction);
+            }
+        }
+        await transaction.CommitAsync();
+        return Ok(new { count = request.Items.Count, message = "Extrações atualizadas com sucesso." });
+    }
+
     [HttpGet("forecast")]
     public async Task<IActionResult> Forecast(string bank = "LT NACIONAL", string time = "21:00", int windowDays = 15, int top = 8) =>
         Ok(await analysis.Forecast(bank, time, Math.Clamp(windowDays, 1, 3650), Math.Clamp(top, 1, 100)));

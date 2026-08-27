@@ -2,6 +2,7 @@ import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { forkJoin } from 'rxjs';
 
 interface ParsedResult { position: number; number: string; milhar: string | null; centena: string | null; dezena: string | null; group: number | null; animal: string | null; }
 interface ParsedExtraction { date: string | null; bank: string; time: string | null; results: ParsedResult[]; warnings: string[]; }
@@ -27,6 +28,8 @@ export class AppComponent implements OnInit {
     committing = false;
     loadingHistory = false;
     editingId: number | null = null;
+    editingIds: number[] = [];
+    selectedHistoryIds = new Set<number>();
     history: HistoryItem[] = [];
     activeSection: 'import' | 'history' | 'analysis' = 'import';
     historyBank = 'LT NACIONAL';
@@ -55,6 +58,7 @@ export class AppComponent implements OnInit {
         const files = Array.from(input.files || []);
         if (!files.length) return;
         this.editingId = null;
+        this.editingIds = [];
         this.error = '';
         this.message = '';
         for (const file of files) this.importQueue.push({ id: Date.now() + Math.random(), file, fileName: file.name, status: 'waiting' });
@@ -96,6 +100,8 @@ export class AppComponent implements OnInit {
         this.preview = item.preview;
         this.activeQueueId = id;
         this.editingId = null;
+        this.editingIds = [];
+        this.editingIds = [];
         this.activeSection = 'import';
     }
 
@@ -165,15 +171,17 @@ export class AppComponent implements OnInit {
         this.committing = true;
         this.error = '';
         this.message = '';
-        const request = this.editingId === null
-            ? this.http.post<any>(this.api + '/imports/commit', this.preview)
-            : this.http.put<any>(this.api + `/history/${this.editingId}`, this.preview.extractions[0]);
+        const request = this.editingIds.length > 1
+            ? this.http.put<any>(this.api + '/history/batch', { items: this.editingIds.map((id, index) => ({ id, extraction: this.preview!.extractions[index] })) })
+            : this.editingId === null
+                ? this.http.post<any>(this.api + '/imports/commit', this.preview)
+                : this.http.put<any>(this.api + `/history/${this.editingId}`, this.preview.extractions[0]);
         request.subscribe({
             next: response => {
-                this.message = this.editingId === null ? `${response.count} extrações importadas com sucesso.` : 'Extração atualizada com sucesso.';
+                this.message = this.editingId === null ? `${response.count} extrações importadas com sucesso.` : this.editingIds.length > 1 ? `${response.count} extrações atualizadas com sucesso.` : 'Extração atualizada com sucesso.';
                 const queueItem = this.importQueue.find(item => item.id === this.activeQueueId);
                 if (queueItem) { queueItem.status = 'imported'; queueItem.preview = undefined; }
-                this.committing = false; this.preview = null; this.editingId = null; this.activeQueueId = null; this.loadHistory(1);
+                this.committing = false; this.preview = null; this.editingId = null; this.editingIds = []; this.activeQueueId = null; this.selectedHistoryIds.clear(); this.loadHistory(1);
                 const nextReady = this.importQueue.find(item => item.status === 'ready');
                 if (nextReady) this.openQueueItem(nextReady.id);
             },
@@ -190,7 +198,7 @@ export class AppComponent implements OnInit {
         if (this.historyEndDate) params.set('endDate', this.historyEndDate);
         if (this.historyTime) params.set('time', this.historyTime);
         this.http.get<HistoryResponse>(this.api + `/history?${params}`).subscribe({
-            next: response => { this.history = response.items; this.historyTotal = response.total; this.historyPage = response.page; this.historyTotalPages = response.totalPages; this.loadingHistory = false; },
+            next: response => { this.history = response.items; this.historyTotal = response.total; this.historyPage = response.page; this.historyTotalPages = response.totalPages; this.selectedHistoryIds.clear(); this.loadingHistory = false; },
             error: error => { this.error = this.errorMessage(error); this.loadingHistory = false; }
         });
     }
@@ -202,6 +210,7 @@ export class AppComponent implements OnInit {
                 this.prepareForReview(preview);
                 this.preview = preview;
                 this.editingId = id;
+                this.editingIds = [id];
                 this.activeQueueId = null;
                 this.activeSection = 'import';
                 this.error = '';
@@ -211,7 +220,35 @@ export class AppComponent implements OnInit {
         });
     }
 
-    cancelReview() { this.preview = null; this.editingId = null; this.activeQueueId = null; }
+    toggleHistorySelection(id: number, selected: boolean) {
+        if (selected) this.selectedHistoryIds.add(id); else this.selectedHistoryIds.delete(id);
+    }
+
+    toggleCurrentPageSelection() {
+        const allSelected = this.history.length > 0 && this.history.every(item => this.selectedHistoryIds.has(item.id));
+        for (const item of this.history) allSelected ? this.selectedHistoryIds.delete(item.id) : this.selectedHistoryIds.add(item.id);
+    }
+
+    editSelectedHistory() {
+        const ids = this.history.filter(item => this.selectedHistoryIds.has(item.id)).map(item => item.id);
+        if (!ids.length) return;
+        forkJoin(ids.map(id => this.http.get<ParsedExtraction>(this.api + `/history/${id}`))).subscribe({
+            next: extractions => {
+                const preview: ImportPreview = { fileName: `Edição de ${ids.length} extrações`, sourceHash: `batch-${Date.now()}`, usedOcr: false, extractions, warnings: ['Você está editando vários registros. Todas as alterações serão salvas juntas.'] };
+                this.prepareForReview(preview);
+                this.preview = preview;
+                this.editingId = ids[0];
+                this.editingIds = ids;
+                this.activeQueueId = null;
+                this.activeSection = 'import';
+                this.error = '';
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            },
+            error: error => this.error = this.errorMessage(error)
+        });
+    }
+
+    cancelReview() { this.preview = null; this.editingId = null; this.editingIds = []; this.activeQueueId = null; }
 
     clearHistoryFilters() {
         this.historyBank = '';

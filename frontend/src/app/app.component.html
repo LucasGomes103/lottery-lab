@@ -18,7 +18,7 @@
 
     <div *ngIf="preview" class="card">
       <div class="preview-head">
-        <div><strong>{{preview.fileName}}</strong><div class="muted">{{editingId !== null ? 'Editando registro existente' : preview.extractions.length + ' horários reconhecidos · ' + (preview.usedOcr ? 'OCR utilizado' : 'entrada manual/textual')}}</div></div>
+        <div><strong>{{preview.fileName}}</strong><div class="muted">{{editingIds.length > 1 ? 'Editando ' + editingIds.length + ' registros existentes' : editingId !== null ? 'Editando registro existente' : preview.extractions.length + ' horários reconhecidos · ' + (preview.usedOcr ? 'OCR utilizado' : 'entrada manual/textual')}}</div></div>
         <span class="badge" [class.review]="preview.warnings.length">{{preview.warnings.length ? 'Revisar' : 'Reconhecido'}}</span>
       </div>
       <p *ngFor="let warning of preview.warnings" class="warn">{{warning}}</p>
@@ -28,7 +28,7 @@
           <label>Banca <input [(ngModel)]="extraction.bank"></label>
           <label>Data <input type="date" [(ngModel)]="extraction.date"></label>
           <label>Horário <input type="time" [(ngModel)]="extraction.time"></label>
-          <button type="button" class="danger" (click)="removeExtraction(extractionIndex)">Remover horário</button>
+          <button *ngIf="editingId === null" type="button" class="danger" (click)="removeExtraction(extractionIndex)">Remover horário</button>
         </div>
         <p *ngFor="let warning of extraction.warnings" class="warn">{{warning}}</p>
         <table>
@@ -41,7 +41,7 @@
           </tr></tbody>
         </table>
       </article>
-      <div class="actions"><button type="button" class="secondary" (click)="cancelReview()">Cancelar</button><button *ngIf="editingId === null" type="button" class="secondary" (click)="addExtraction()">Adicionar horário ausente</button><button (click)="commit()" [disabled]="committing || !preview.extractions.length">{{committing ? 'Salvando...' : (editingId !== null ? 'Salvar alterações' : 'Confirmar todas as extrações')}}</button></div>
+      <div class="actions"><button type="button" class="secondary" (click)="cancelReview()">Cancelar</button><button *ngIf="editingId === null" type="button" class="secondary" (click)="addExtraction()">Adicionar horário ausente</button><button (click)="commit()" [disabled]="committing || !preview.extractions.length">{{committing ? 'Salvando...' : (editingIds.length > 1 ? 'Salvar ' + editingIds.length + ' extrações' : editingId !== null ? 'Salvar alterações' : 'Confirmar todas as extrações')}}</button></div>
     </div>
   </section>
 
@@ -49,9 +49,10 @@
     <div class="section-head"><div><h2>Base histórica</h2><p class="muted">Confira o que já foi importado e corrija qualquer resultado.</p></div><span class="badge">{{historyTotal}} extrações</span></div>
     <div class="card">
       <div class="history-filters"><label>Banca <input [(ngModel)]="historyBank" placeholder="Todas"></label><label>Data inicial <input type="date" [(ngModel)]="historyStartDate"></label><label>Data final <input type="date" [(ngModel)]="historyEndDate"></label><label>Horário <input type="time" [(ngModel)]="historyTime"></label><label>Itens por página <select [(ngModel)]="historyPageSize"><option [ngValue]="10">10</option><option [ngValue]="20">20</option><option [ngValue]="50">50</option><option [ngValue]="100">100</option></select></label><button type="button" (click)="loadHistory(1)">Filtrar</button><button type="button" class="secondary" (click)="clearHistoryFilters()">Limpar</button></div>
+      <div *ngIf="history.length" class="selection-bar"><button type="button" class="secondary small" (click)="toggleCurrentPageSelection()">Selecionar/desmarcar página</button><span>{{selectedHistoryIds.size}} selecionadas</span><button type="button" (click)="editSelectedHistory()" [disabled]="!selectedHistoryIds.size">Editar selecionadas</button></div>
       <p *ngIf="loadingHistory" class="muted">Carregando histórico...</p>
       <p *ngIf="!loadingHistory && !history.length" class="muted">Nenhuma extração encontrada com esses filtros.</p>
-      <table *ngIf="history.length"><thead><tr><th>Data</th><th>Horário</th><th>Banca</th><th>Resultados</th><th></th></tr></thead><tbody><tr *ngFor="let item of history"><td>{{item.extraction_date | date:'dd/MM/yyyy'}}</td><td>{{item.extraction_time.slice(0,5)}}</td><td>{{item.bank}}</td><td>{{item.results}} de 7</td><td><button type="button" class="secondary small" (click)="editHistory(item.id)">Ver e editar</button></td></tr></tbody></table>
+      <table *ngIf="history.length"><thead><tr><th class="check-col"></th><th>Data</th><th>Horário</th><th>Banca</th><th>Resultados</th><th></th></tr></thead><tbody><tr *ngFor="let item of history"><td class="check-col"><input type="checkbox" [checked]="selectedHistoryIds.has(item.id)" (change)="toggleHistorySelection(item.id, $any($event.target).checked)"></td><td>{{item.extraction_date | date:'dd/MM/yyyy'}}</td><td>{{item.extraction_time.slice(0,5)}}</td><td>{{item.bank}}</td><td>{{item.results}} de 7</td><td><button type="button" class="secondary small" (click)="editHistory(item.id)">Ver e editar</button></td></tr></tbody></table>
       <div *ngIf="historyTotalPages > 1" class="pagination"><button type="button" class="secondary" (click)="loadHistory(historyPage - 1)" [disabled]="historyPage === 1">Anterior</button><span>Página <strong>{{historyPage}}</strong> de <strong>{{historyTotalPages}}</strong></span><button type="button" class="secondary" (click)="loadHistory(historyPage + 1)" [disabled]="historyPage === historyTotalPages">Próxima</button></div>
     </div>
   </section>
