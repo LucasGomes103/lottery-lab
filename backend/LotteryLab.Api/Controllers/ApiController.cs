@@ -40,22 +40,27 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
             Date = x.Date!.Value.ToDateTime(TimeOnly.MinValue),
             Time = x.Time!
         }).ToList();
-        var duplicates = new List<object>();
+        var existingKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var key in keys)
         {
             var exists = await connection.ExecuteScalarAsync<bool>(
                 "select exists(select 1 from extractions where bank=@Bank and extraction_date=@Date and extraction_time=@Time::time)", key);
-            if (exists) duplicates.Add(new { key.Bank, key.Date, key.Time });
+            if (exists) existingKeys.Add(ExtractionKey(key.Bank, DateOnly.FromDateTime(key.Date), key.Time));
         }
-        if (duplicates.Count > 0) return Conflict(new { message = "Uma ou mais extrações já foram importadas.", duplicates });
 
         await using var transaction = await connection.BeginTransactionAsync();
         var imported = new List<object>();
+        var insertedCount = 0;
+        var updatedCount = 0;
         foreach (var extraction in preview.Extractions)
         {
+            var wasExisting = existingKeys.Contains(ExtractionKey(extraction.Bank, extraction.Date!.Value, extraction.Time!));
             var id = await connection.ExecuteScalarAsync<long>(
                 @"insert into extractions(bank,extraction_date,extraction_time,source_file)
-                  values(@Bank,@Date,@Time::time,@FileName) returning id",
+                  values(@Bank,@Date,@Time::time,@FileName)
+                  on conflict(bank,extraction_date,extraction_time) do update
+                  set source_file=excluded.source_file, imported_at=now()
+                  returning id",
                 new
                 {
                     extraction.Bank,
@@ -64,6 +69,8 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
                     preview.FileName
                 }, transaction);
 
+            if (wasExisting)
+                await connection.ExecuteAsync("delete from results where extraction_id=@id", new { id }, transaction);
             foreach (var result in extraction.Results)
             {
                 var normalized = NormalizeResult(result);
@@ -72,12 +79,20 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
                       values(@id,@Position,@Number,@Centena,@Dezena,@Group,@Animal)",
                     new { id, normalized.Position, normalized.Number, normalized.Centena, normalized.Dezena, Group = normalized.Group, normalized.Animal }, transaction);
             }
-            imported.Add(new { id, extraction.Bank, extraction.Date, extraction.Time, count = extraction.Results.Count });
+            if (wasExisting) updatedCount++; else insertedCount++;
+            imported.Add(new { id, extraction.Bank, extraction.Date, extraction.Time, count = extraction.Results.Count, action = wasExisting ? "updated" : "inserted" });
         }
         await transaction.CommitAsync();
         foreach (var extraction in preview.Extractions)
             await predictions.EvaluatePending(extraction.Bank, extraction.Date!.Value, extraction.Time!);
-        return Ok(new { count = imported.Count, extractions = imported });
+        return Ok(new
+        {
+            count = imported.Count,
+            insertedCount,
+            updatedCount,
+            message = $"{insertedCount} novas extrações inseridas e {updatedCount} existentes atualizadas.",
+            extractions = imported
+        });
     }
 
     [HttpGet("history")]
@@ -322,4 +337,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         string[] animals = ["AVESTRUZ", "AGUIA", "BURRO", "BORBOLETA", "CACHORRO", "CABRA", "CARNEIRO", "CAMELO", "COBRA", "COELHO", "CAVALO", "ELEFANTE", "GALO", "GATO", "JACARE", "LEAO", "MACACO", "PORCO", "PAVAO", "PERU", "TOURO", "TIGRE", "URSO", "VEADO", "VACA"];
         return new ParsedResult(result.Position, number, result.Position == 7 ? null : number, centena, dezena, group, animals[group - 1]);
     }
+
+    private static string ExtractionKey(string bank, DateOnly date, string time) =>
+        $"{bank.Trim()}|{date:yyyy-MM-dd}|{TimeOnly.Parse(time):HH:mm}";
 }

@@ -186,7 +186,7 @@ export class AppComponent implements OnInit {
                 : this.http.put<any>(this.api + `/history/${this.editingId}`, this.preview.extractions[0]);
         request.subscribe({
             next: response => {
-                this.message = this.editingId === null ? `${response.count} extrações importadas com sucesso.` : this.editingIds.length > 1 ? `${response.count} extrações atualizadas com sucesso.` : 'Extração atualizada com sucesso.';
+                this.message = this.editingId === null ? (response.message || `${response.count} extrações importadas com sucesso.`) : this.editingIds.length > 1 ? `${response.count} extrações atualizadas com sucesso.` : 'Extração atualizada com sucesso.';
                 const queueItem = this.importQueue.find(item => item.id === this.activeQueueId);
                 if (queueItem) { queueItem.status = 'imported'; queueItem.preview = undefined; }
                 this.committing = false; this.preview = null; this.editingId = null; this.editingIds = []; this.activeQueueId = null; this.selectedHistoryIds.clear(); this.loadHistory(1);

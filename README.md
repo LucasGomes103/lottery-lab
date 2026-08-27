@@ -41,7 +41,7 @@ Acesse:
 ## PDFs escaneados
 O importador tenta primeiro a camada textual com PdfPig. Quando não encontra horários/resultados suficientes, renderiza as páginas com Poppler e executa Tesseract OCR automaticamente. O container do backend já instala `poppler-utils`, `tesseract-ocr` e o idioma português.
 
-Um arquivo pode gerar várias extrações independentes (por exemplo 02h, 08h, 10h, 12h, 15h e 17h). A API retorna todas no preview para revisão e somente grava após a confirmação. Uma chave já existente de banca + data + horário retorna HTTP 409 e não é sobrescrita.
+Um arquivo pode gerar várias extrações independentes (por exemplo 02h, 08h, 10h, 12h, 15h e 17h). A API retorna todas no preview para revisão e somente grava após a confirmação. Na reimportação, uma chave já existente de banca + data + horário é atualizada com os dados revisados, enquanto horários ainda inexistentes são inseridos, tudo na mesma transação.
 
 ## Banco
 Em uma instalação nova, execute `database/schema.sql` uma vez. As tabelas do motor de previsões são criadas de forma idempotente pela própria API durante a inicialização; `database/002_prediction_engine.sql` também documenta a migração para execução manual/auditoria.

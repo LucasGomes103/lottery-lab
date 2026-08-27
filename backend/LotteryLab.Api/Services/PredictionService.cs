@@ -117,8 +117,7 @@ public sealed class PredictionService(Db db)
         var actual = (await connection.QueryAsync<(int Position, string Number)>(
             "select position,number from results where extraction_id=@id and position between 1 and 6", new { id = extraction })).ToList();
         var predictions = await connection.QueryAsync<Guid>(
-            @"select id from predictions where bank=@bank and target_date=@date and target_time=@time::time
-              and not exists(select 1 from prediction_evaluations pe where pe.prediction_id=predictions.id)",
+            @"select id from predictions where bank=@bank and target_date=@date and target_time=@time::time",
             new { bank, date = date.ToDateTime(TimeOnly.MinValue), time });
         foreach (var predictionId in predictions)
         {
@@ -132,7 +131,11 @@ public sealed class PredictionService(Db db)
                 @"insert into prediction_evaluations(prediction_id,extraction_id,hit_milhar,hit_centena,hit_dezena,
                     best_milhar_position,best_centena_position,best_dezena_position,details)
                   values(@predictionId,@extraction,@hitMilhar,@hitCentena,@hitDezena,@milharPos,@centenaPos,@dezenaPos,@details::jsonb)
-                  on conflict(prediction_id) do nothing;
+                  on conflict(prediction_id) do update set
+                    extraction_id=excluded.extraction_id,evaluated_at=now(),
+                    hit_milhar=excluded.hit_milhar,hit_centena=excluded.hit_centena,hit_dezena=excluded.hit_dezena,
+                    best_milhar_position=excluded.best_milhar_position,best_centena_position=excluded.best_centena_position,
+                    best_dezena_position=excluded.best_dezena_position,details=excluded.details;
                   update predictions set status='EVALUATED' where id=@predictionId",
                 new { predictionId, extraction, hitMilhar = milharPos is not null, hitCentena = centenaPos is not null,
                     hitDezena = dezenaPos is not null, milharPos, centenaPos, dezenaPos, details });
