@@ -5,9 +5,16 @@
 
   <section *ngIf="activeSection === 'import'">
     <h2>Importar resultados</h2>
-    <p class="muted">Envie um PDF com texto ou imagem. Nada será salvo antes da sua confirmação.</p>
-    <div class="upload-actions"><input type="file" accept="application/pdf,.pdf" (change)="select($event)" [disabled]="loading"><button type="button" class="secondary" (click)="startManualImport()" [disabled]="loading">Inserir manualmente</button></div>
-    <span *ngIf="loading" class="loading"> Renderizando e lendo o PDF por OCR...</span>
+    <p class="muted">Selecione um ou vários PDFs. A fila lê um arquivo por vez e nada é salvo antes da sua confirmação.</p>
+    <div class="upload-actions"><input type="file" multiple accept="application/pdf,.pdf" (change)="select($event)"><button type="button" class="secondary" (click)="startManualImport()">Inserir manualmente</button></div>
+
+    <div *ngIf="importQueue.length" class="card queue-card">
+      <div class="section-head"><div><strong>Fila de importação</strong><p class="muted">Você pode revisar um arquivo enquanto o próximo é processado.</p></div><span class="badge">{{importQueue.length}} arquivos</span></div>
+      <div *ngFor="let item of importQueue" class="queue-item">
+        <div><strong>{{item.fileName}}</strong><div class="muted" [class.queue-error]="item.status === 'error'">{{item.error || queueStatus(item)}}</div></div>
+        <div class="queue-actions"><button *ngIf="item.status === 'ready'" type="button" class="secondary small" (click)="openQueueItem(item.id)">Revisar</button><button *ngIf="item.status !== 'processing'" type="button" class="secondary small" (click)="removeQueueItem(item.id)">{{item.status === 'imported' ? 'Limpar' : 'Remover'}}</button></div>
+      </div>
+    </div>
 
     <div *ngIf="preview" class="card">
       <div class="preview-head">

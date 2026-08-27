@@ -8,6 +8,7 @@ interface ParsedExtraction { date: string | null; bank: string; time: string | n
 interface ImportPreview { fileName: string; sourceHash: string; usedOcr: boolean; extractions: ParsedExtraction[]; warnings: string[]; }
 interface HistoryItem { id: number; bank: string; extraction_date: string; extraction_time: string; results: number; }
 interface HistoryResponse { items: HistoryItem[]; total: number; page: number; pageSize: number; totalPages: number; }
+interface ImportQueueItem { id: number; file?: File; fileName: string; status: 'waiting' | 'processing' | 'ready' | 'imported' | 'error'; preview?: ImportPreview; error?: string; }
 
 @Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule], templateUrl: './app.component.html' })
 export class AppComponent implements OnInit {
@@ -20,6 +21,9 @@ export class AppComponent implements OnInit {
     message = '';
     error = '';
     loading = false;
+    queueProcessing = false;
+    importQueue: ImportQueueItem[] = [];
+    activeQueueId: number | null = null;
     committing = false;
     loadingHistory = false;
     editingId: number | null = null;
@@ -47,19 +51,63 @@ export class AppComponent implements OnInit {
     }
 
     select(event: Event) {
-        const file = (event.target as HTMLInputElement).files?.[0];
-        if (!file) return;
-        const form = new FormData();
-        form.append('file', file);
-        this.loading = true;
+        const input = event.target as HTMLInputElement;
+        const files = Array.from(input.files || []);
+        if (!files.length) return;
         this.editingId = null;
-        this.preview = null;
         this.error = '';
         this.message = '';
+        for (const file of files) this.importQueue.push({ id: Date.now() + Math.random(), file, fileName: file.name, status: 'waiting' });
+        input.value = '';
+        this.processQueue();
+    }
+
+    processQueue() {
+        if (this.queueProcessing) return;
+        const item = this.importQueue.find(candidate => candidate.status === 'waiting');
+        if (!item?.file) return;
+        this.queueProcessing = true;
+        item.status = 'processing';
+        const form = new FormData();
+        form.append('file', item.file);
         this.http.post<ImportPreview>(this.api + '/imports/preview', form).subscribe({
-            next: preview => { this.prepareForReview(preview); this.preview = preview; this.loading = false; },
-            error: error => { this.error = this.errorMessage(error); this.loading = false; }
+            next: preview => {
+                this.prepareForReview(preview);
+                item.preview = preview;
+                item.file = undefined;
+                item.status = 'ready';
+                if (!this.preview) this.openQueueItem(item.id);
+                this.queueProcessing = false;
+                this.processQueue();
+            },
+            error: error => {
+                item.error = this.errorMessage(error);
+                item.file = undefined;
+                item.status = 'error';
+                this.queueProcessing = false;
+                this.processQueue();
+            }
         });
+    }
+
+    openQueueItem(id: number) {
+        const item = this.importQueue.find(candidate => candidate.id === id);
+        if (!item?.preview) return;
+        this.preview = item.preview;
+        this.activeQueueId = id;
+        this.editingId = null;
+        this.activeSection = 'import';
+    }
+
+    removeQueueItem(id: number) {
+        const item = this.importQueue.find(candidate => candidate.id === id);
+        if (!item || item.status === 'processing') return;
+        this.importQueue = this.importQueue.filter(candidate => candidate.id !== id);
+        if (this.activeQueueId === id) { this.preview = null; this.activeQueueId = null; }
+    }
+
+    queueStatus(item: ImportQueueItem) {
+        return { waiting: 'Aguardando', processing: 'Lendo PDF...', ready: 'Pronto para revisar', imported: 'Importado', error: 'Falhou' }[item.status];
     }
 
     startManualImport() {
@@ -77,6 +125,7 @@ export class AppComponent implements OnInit {
             }]
         };
         this.editingId = null;
+        this.activeQueueId = null;
         this.error = '';
         this.message = '';
     }
@@ -120,7 +169,14 @@ export class AppComponent implements OnInit {
             ? this.http.post<any>(this.api + '/imports/commit', this.preview)
             : this.http.put<any>(this.api + `/history/${this.editingId}`, this.preview.extractions[0]);
         request.subscribe({
-            next: response => { this.message = this.editingId === null ? `${response.count} extrações importadas com sucesso.` : 'Extração atualizada com sucesso.'; this.committing = false; this.preview = null; this.editingId = null; this.loadHistory(1); },
+            next: response => {
+                this.message = this.editingId === null ? `${response.count} extrações importadas com sucesso.` : 'Extração atualizada com sucesso.';
+                const queueItem = this.importQueue.find(item => item.id === this.activeQueueId);
+                if (queueItem) { queueItem.status = 'imported'; queueItem.preview = undefined; }
+                this.committing = false; this.preview = null; this.editingId = null; this.activeQueueId = null; this.loadHistory(1);
+                const nextReady = this.importQueue.find(item => item.status === 'ready');
+                if (nextReady) this.openQueueItem(nextReady.id);
+            },
             error: error => { this.error = this.errorMessage(error); this.committing = false; }
         });
     }
@@ -146,6 +202,7 @@ export class AppComponent implements OnInit {
                 this.prepareForReview(preview);
                 this.preview = preview;
                 this.editingId = id;
+                this.activeQueueId = null;
                 this.activeSection = 'import';
                 this.error = '';
                 window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -154,7 +211,7 @@ export class AppComponent implements OnInit {
         });
     }
 
-    cancelReview() { this.preview = null; this.editingId = null; }
+    cancelReview() { this.preview = null; this.editingId = null; this.activeQueueId = null; }
 
     clearHistoryFilters() {
         this.historyBank = '';
