@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
@@ -6,9 +6,10 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 interface ParsedResult { position: number; number: string; milhar: string | null; centena: string | null; dezena: string | null; group: number | null; animal: string | null; }
 interface ParsedExtraction { date: string | null; bank: string; time: string | null; results: ParsedResult[]; warnings: string[]; }
 interface ImportPreview { fileName: string; sourceHash: string; usedOcr: boolean; extractions: ParsedExtraction[]; warnings: string[]; }
+interface HistoryItem { id: number; bank: string; extraction_date: string; extraction_time: string; results: number; }
 
 @Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule], templateUrl: './app.component.html' })
-export class AppComponent {
+export class AppComponent implements OnInit {
     private http = inject(HttpClient);
     api = location.hostname === 'localhost' ? 'http://localhost:8080/api' : 'https://lottery-lab.onrender.com/api';
     preview: ImportPreview | null = null;
@@ -19,9 +20,14 @@ export class AppComponent {
     error = '';
     loading = false;
     committing = false;
+    loadingHistory = false;
+    editingId: number | null = null;
+    history: HistoryItem[] = [];
     bank = 'LT NACIONAL';
     time = '21:00';
     windowDays = 15;
+
+    ngOnInit() { this.loadHistory(); }
 
     select(event: Event) {
         const file = (event.target as HTMLInputElement).files?.[0];
@@ -29,6 +35,7 @@ export class AppComponent {
         const form = new FormData();
         form.append('file', file);
         this.loading = true;
+        this.editingId = null;
         this.preview = null;
         this.error = '';
         this.message = '';
@@ -52,6 +59,7 @@ export class AppComponent {
                 warnings: ['Informe o horário e os sete resultados.']
             }]
         };
+        this.editingId = null;
         this.error = '';
         this.message = '';
     }
@@ -91,11 +99,38 @@ export class AppComponent {
         this.committing = true;
         this.error = '';
         this.message = '';
-        this.http.post<any>(this.api + '/imports/commit', this.preview).subscribe({
-            next: response => { this.message = `${response.count} extrações importadas com sucesso.`; this.committing = false; this.preview = null; },
+        const request = this.editingId === null
+            ? this.http.post<any>(this.api + '/imports/commit', this.preview)
+            : this.http.put<any>(this.api + `/history/${this.editingId}`, this.preview.extractions[0]);
+        request.subscribe({
+            next: response => { this.message = this.editingId === null ? `${response.count} extrações importadas com sucesso.` : 'Extração atualizada com sucesso.'; this.committing = false; this.preview = null; this.editingId = null; this.loadHistory(); },
             error: error => { this.error = this.errorMessage(error); this.committing = false; }
         });
     }
+
+    loadHistory() {
+        this.loadingHistory = true;
+        this.http.get<HistoryItem[]>(this.api + `/history?bank=${encodeURIComponent(this.bank)}&take=200`).subscribe({
+            next: history => { this.history = history; this.loadingHistory = false; },
+            error: error => { this.error = this.errorMessage(error); this.loadingHistory = false; }
+        });
+    }
+
+    editHistory(id: number) {
+        this.http.get<ParsedExtraction>(this.api + `/history/${id}`).subscribe({
+            next: extraction => {
+                const preview: ImportPreview = { fileName: 'Edição do histórico', sourceHash: `edit-${id}`, usedOcr: false, extractions: [extraction], warnings: ['Você está editando uma extração já gravada.'] };
+                this.prepareForReview(preview);
+                this.preview = preview;
+                this.editingId = id;
+                this.error = '';
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            },
+            error: error => this.error = this.errorMessage(error)
+        });
+    }
+
+    cancelReview() { this.preview = null; this.editingId = null; }
 
     analyze() {
         this.http.get(this.api + `/forecast?bank=${encodeURIComponent(this.bank)}&time=${this.time}&windowDays=${this.windowDays}&top=10`).subscribe(x => this.forecast = x);
