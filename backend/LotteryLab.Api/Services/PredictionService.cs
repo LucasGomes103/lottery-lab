@@ -164,6 +164,9 @@ public sealed class PredictionService(Db db)
         await using var connection = db.Open();
         var prediction = await connection.QuerySingleOrDefaultAsync("select * from predictions where id=@id", new { id });
         if (prediction is null) return null;
+        var target = await connection.QuerySingleAsync<PredictionTarget>(
+            @"select bank as Bank,target_date as TargetDate,target_time as TargetTime
+              from predictions where id=@id", new { id });
         var candidates = (await connection.QueryAsync<StoredCandidate>(
             @"select rank,milhar,centena,dezena,group_no as ""Group"",selection_type as SelectionType,
                      statistical_score::double precision as StatisticalScore,
@@ -181,11 +184,28 @@ public sealed class PredictionService(Db db)
         var actual = evaluation is null ? [] : (await connection.QueryAsync<(int Position, string Number)>(
             "select position,number from results where extraction_id=@id and position between 1 and 6 order by position",
             new { id = evaluation.ExtractionId })).ToList();
+        var dayResults = (await connection.QueryAsync<(TimeSpan Time, int Position, string Number)>(
+            @"select e.extraction_time as Time,r.position as Position,r.number as Number
+              from extractions e join results r on r.extraction_id=e.id
+              where e.bank=@bank and e.extraction_date=@date and r.position between 1 and 6
+              order by e.extraction_time,r.position",
+            new { bank = target.Bank, date = target.TargetDate.Date })).ToList();
+        var beforeTarget = dayResults.Where(x => x.Time < target.TargetTime).ToList();
         var detailed = candidates.Select(candidate =>
         {
             var milharMatches = actual.Where(x => x.Number == candidate.Milhar).Select(x => new { x.Position, x.Number }).ToList();
             var centenaMatches = actual.Where(x => x.Number.EndsWith(candidate.Centena)).Select(x => new { x.Position, x.Number }).ToList();
             var dezenaMatches = actual.Where(x => x.Number.EndsWith(candidate.Dezena)).Select(x => new { x.Position, x.Number }).ToList();
+            object Match(TimeSpan matchTime, int position, string number) => new
+            {
+                Time = $"{matchTime.Hours:00}:{matchTime.Minutes:00}", Position = position, Number = number
+            };
+            var beforeMilhar = beforeTarget.Where(x => x.Number == candidate.Milhar).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
+            var beforeCentena = beforeTarget.Where(x => x.Number.EndsWith(candidate.Centena)).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
+            var beforeDezena = beforeTarget.Where(x => x.Number.EndsWith(candidate.Dezena)).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
+            var dayMilhar = dayResults.Where(x => x.Number == candidate.Milhar).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
+            var dayCentena = dayResults.Where(x => x.Number.EndsWith(candidate.Centena)).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
+            var dayDezena = dayResults.Where(x => x.Number.EndsWith(candidate.Dezena)).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
             return new
             {
                 candidate.Rank, candidate.Milhar, candidate.Centena, candidate.Dezena, candidate.Group,
@@ -196,18 +216,38 @@ public sealed class PredictionService(Db db)
                 {
                     Milhar = milharMatches.Count > 0, Centena = centenaMatches.Count > 0, Dezena = dezenaMatches.Count > 0,
                     MilharMatches = milharMatches, CentenaMatches = centenaMatches, DezenaMatches = dezenaMatches
-                }
+                },
+                BeforeTargetHits = new { Milhar = beforeMilhar.Count > 0, Centena = beforeCentena.Count > 0,
+                    Dezena = beforeDezena.Count > 0, MilharMatches = beforeMilhar, CentenaMatches = beforeCentena,
+                    DezenaMatches = beforeDezena },
+                WholeDayHits = new { Milhar = dayMilhar.Count > 0, Centena = dayCentena.Count > 0,
+                    Dezena = dayDezena.Count > 0, MilharMatches = dayMilhar, CentenaMatches = dayCentena,
+                    DezenaMatches = dayDezena }
             };
         }).ToList();
+        var beforeSummary = new { MilharHits = detailed.Sum(x => x.BeforeTargetHits.MilharMatches.Count),
+            CentenaHits = detailed.Sum(x => x.BeforeTargetHits.CentenaMatches.Count),
+            DezenaHits = detailed.Sum(x => x.BeforeTargetHits.DezenaMatches.Count) };
+        var wholeDaySummary = new { MilharHits = detailed.Sum(x => x.WholeDayHits.MilharMatches.Count),
+            CentenaHits = detailed.Sum(x => x.WholeDayHits.CentenaMatches.Count),
+            DezenaHits = detailed.Sum(x => x.WholeDayHits.DezenaMatches.Count) };
         return new
         {
             prediction,
             candidates = detailed,
             evaluation,
+            dayCheck = new
+            {
+                BeforeTarget = beforeSummary,
+                WholeDay = wholeDaySummary,
+                ImportedSchedules = dayResults.Select(x => x.Time).Distinct().Count()
+            },
             actualResults = actual.Select(x => new
             {
                 x.Position, x.Number, Centena = x.Number[^3..], Dezena = x.Number[^2..], Group = GroupOf(x.Number)
-            })
+            }),
+            dayResults = dayResults.Select(x => new { Time = $"{x.Time.Hours:00}:{x.Time.Minutes:00}",
+                x.Position, x.Number, Centena = x.Number[^3..], Dezena = x.Number[^2..], Group = GroupOf(x.Number) })
         };
     }
 

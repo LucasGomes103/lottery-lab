@@ -431,8 +431,8 @@ export class AppComponent implements OnInit {
         return item.status === 'EVALUATED' ? 'Conferida' : 'Aguardando resultado';
     }
 
-    matchLabel(matches: Array<{ position: number; number: string }>) {
-        return matches?.map(match => `${match.position}º: ${match.number}`).join(', ') || '';
+    matchLabel(matches: Array<{ time?: string; position: number; number: string }>) {
+        return matches?.map(match => `${match.time ? match.time + ' ' : ''}${match.position}º: ${match.number}`).join(', ') || '';
     }
 
     exportGeneratedPrediction() {
@@ -467,12 +467,20 @@ export class AppComponent implements OnInit {
                 evaluated ? (hits.centena ? 'SIM' : 'NÃO') : 'PENDENTE',
                 evaluated ? (hits.dezena ? 'SIM' : 'NÃO') : 'PENDENTE',
                 this.matchLabel(hits.milharMatches || []), this.matchLabel(hits.centenaMatches || []),
-                this.matchLabel(hits.dezenaMatches || [])
+                this.matchLabel(hits.dezenaMatches || []),
+                this.matchLabel(candidate.beforeTargetHits?.milharMatches || []),
+                this.matchLabel(candidate.beforeTargetHits?.centenaMatches || []),
+                this.matchLabel(candidate.beforeTargetHits?.dezenaMatches || []),
+                this.matchLabel(candidate.wholeDayHits?.milharMatches || []),
+                this.matchLabel(candidate.wholeDayHits?.centenaMatches || []),
+                this.matchLabel(candidate.wholeDayHits?.dezenaMatches || [])
             ];
         });
         const headers = ['Rank', 'Milhar', 'Centena', 'Dezena', 'Grupo/Bicho', 'Estratégia',
             'Score estatístico', 'Score final', 'Principais razões', 'Acertou milhar', 'Acertou centena',
             'Acertou dezena', 'Resultados da milhar', 'Resultados da centena', 'Resultados da dezena'];
+        headers.push('Milhar antes do horário', 'Centena antes do horário', 'Dezena antes do horário',
+            'Milhar no dia', 'Centena no dia', 'Dezena no dia');
         const metadata = [
             ['ID da previsão', prediction.id], ['Banca', prediction.bank],
             ['Data alvo', String(prediction.target_date).slice(0, 10)], ['Horário alvo', String(prediction.target_time).slice(0, 5)],
