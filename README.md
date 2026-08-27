@@ -44,7 +44,16 @@ O importador tenta primeiro a camada textual com PdfPig. Quando não encontra ho
 Um arquivo pode gerar várias extrações independentes (por exemplo 02h, 08h, 10h, 12h, 15h e 17h). A API retorna todas no preview para revisão e somente grava após a confirmação. Uma chave já existente de banca + data + horário retorna HTTP 409 e não é sobrescrita.
 
 ## Banco
-Execute `database/schema.sql` no PostgreSQL de produção.
+Em uma instalação nova, execute `database/schema.sql` uma vez. As tabelas do motor de previsões são criadas de forma idempotente pela própria API durante a inicialização; `database/002_prediction_engine.sql` também documenta a migração para execução manual/auditoria.
+
+## Motor de previsões V2
+- Persiste previsões imutáveis, versão do algoritmo, seed reproduzível, features e justificativas.
+- Combina frequência global e do horário, atraso com peso baixo, continuidade, transição entre horários, momentum, reversão, afinidade de dígitos e novidade.
+- Seleciona aproximadamente 60% por exploitation, 20% emergentes e 20% por exploração controlada, limitando repetição de dezena, centena e grupo.
+- Avalia automaticamente previsões pendentes quando o resultado correspondente é importado ou editado.
+- O backtest usa walk-forward cronológico e compara frequência, atraso e escolha aleatória em treino/validação/teste.
+
+Os scores são rankings relativos, não probabilidades calibradas. Em sorteios independentes não existe fórmula que garanta vantagem; qualquer alegação de melhoria depende de desempenho consistente fora da amostra.
 
 ## Hospedagem recomendada
 ### Banco: Neon
@@ -96,6 +105,9 @@ A IA recebe resultados agregados do Forecast/Backtest. O banco continua sendo a 
 - `GET /api/history`
 - `GET /api/forecast?bank=LT%20NACIONAL&time=21:00&windowDays=15&top=10`
 - `GET /api/backtest?...`
+- `POST /api/predictions/generate` — gera e persiste uma previsão auditável
+- `GET /api/predictions` — histórico paginado de previsões e avaliações
+- `GET /api/predictions/{id}` — candidatos, features e avaliação de uma execução
 - `POST /api/ai/analyze`
 - `GET /health`
 

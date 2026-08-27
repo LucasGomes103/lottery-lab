@@ -8,7 +8,8 @@ namespace LotteryLab.Api.Controllers;
 
 [ApiController]
 [Route("api")]
-public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService analysis, AiService ai, NumberGeneratorService generator) : ControllerBase
+public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService analysis, AiService ai,
+    NumberGeneratorService generator, PredictionService predictions) : ControllerBase
 {
     [HttpPost("imports/preview")]
     [RequestSizeLimit(20_000_000)]
@@ -74,6 +75,8 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
             imported.Add(new { id, extraction.Bank, extraction.Date, extraction.Time, count = extraction.Results.Count });
         }
         await transaction.CommitAsync();
+        foreach (var extraction in preview.Extractions)
+            await predictions.EvaluatePending(extraction.Bank, extraction.Date!.Value, extraction.Time!);
         return Ok(new { count = imported.Count, extractions = imported });
     }
 
@@ -173,6 +176,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
                 new { id, normalized.Position, normalized.Number, normalized.Centena, normalized.Dezena, Group = normalized.Group, normalized.Animal }, transaction);
         }
         await transaction.CommitAsync();
+        await predictions.EvaluatePending(extraction.Bank, extraction.Date!.Value, extraction.Time!);
         return Ok(new { id, message = "Extração atualizada com sucesso." });
     }
 
@@ -229,6 +233,8 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
             }
         }
         await transaction.CommitAsync();
+        foreach (var item in request.Items)
+            await predictions.EvaluatePending(item.Extraction.Bank, item.Extraction.Date!.Value, item.Extraction.Time!);
         return Ok(new { count = request.Items.Count, message = "Extrações atualizadas com sucesso." });
     }
 
@@ -248,6 +254,25 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         if (!TimeOnly.TryParse(time, out _)) return BadRequest(new { message = "Horário inválido." });
         var date = targetDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
         return Ok(await generator.Generate(bank.Trim(), time, date, Math.Clamp(windowDays, 7, 3650), Math.Clamp(quantity, 1, 100)));
+    }
+
+    [HttpPost("predictions/generate")]
+    public async Task<IActionResult> GeneratePrediction(PredictionRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Bank)) return BadRequest(new { message = "Informe a banca." });
+        if (!TimeOnly.TryParse(request.Time, out _)) return BadRequest(new { message = "Horário inválido." });
+        return Ok(await predictions.GenerateAndSave(request));
+    }
+
+    [HttpGet("predictions")]
+    public async Task<IActionResult> Predictions(string? bank = null, int page = 1, int pageSize = 20) =>
+        Ok(await predictions.List(bank, page, pageSize));
+
+    [HttpGet("predictions/{id:guid}")]
+    public async Task<IActionResult> Prediction(Guid id)
+    {
+        var result = await predictions.Detail(id);
+        return result is null ? NotFound(new { message = "Previsão não encontrada." }) : Ok(result);
     }
 
     [HttpGet("backtest")]

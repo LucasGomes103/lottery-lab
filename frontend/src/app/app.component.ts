@@ -10,8 +10,8 @@ interface ImportPreview { fileName: string; sourceHash: string; usedOcr: boolean
 interface HistoryItem { id: number; bank: string; extraction_date: string; extraction_time: string; results: number; }
 interface HistoryResponse { items: HistoryItem[]; total: number; page: number; pageSize: number; totalPages: number; }
 interface ImportQueueItem { id: number; file?: File; fileName: string; status: 'waiting' | 'processing' | 'ready' | 'imported' | 'error'; preview?: ImportPreview; error?: string; }
-interface GeneratedNumber { rank: number; milhar: string; centena: string; dezena: string; score: number; milharSignal: number; centenaSignal: number; dezenaSignal: number; digitSignal: number; }
-interface GenerationResponse { algorithm: string; bank: string; time: string; targetDate: string; windowDays: number; sampleExtractions: number; sampleResults: number; robustness: string; numbers: GeneratedNumber[]; baseline: any; warning: string; }
+interface GeneratedNumber { rank: number; milhar: string; centena: string; dezena: string; group: number; selectionType: string; statisticalScore: number; finalScore: number; features: any; reasons: string[]; }
+interface GenerationResponse { id: string; algorithm: string; algorithmVersion: number; bank: string; time: string; targetDate: string; windowDays: number; quantity: number; randomSeed: number; sampleExtractions: number; sampleResults: number; robustness: string; composition: any; numbers: GeneratedNumber[]; warning: string; }
 
 @Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule], templateUrl: './app.component.html' })
 export class AppComponent implements OnInit {
@@ -49,6 +49,7 @@ export class AppComponent implements OnInit {
     generationQuantity = 10;
     generationWindowDays = 90;
     generation: GenerationResponse | null = null;
+    predictionHistory: any[] = [];
     generating = false;
 
     ngOnInit() { this.loadHistory(1); }
@@ -273,10 +274,17 @@ export class AppComponent implements OnInit {
     generateNumbers() {
         this.generating = true;
         this.error = '';
-        const params = new URLSearchParams({ bank: this.bank, time: this.time, targetDate: this.generationDate, windowDays: String(this.generationWindowDays), quantity: String(this.generationQuantity) });
-        this.http.get<GenerationResponse>(this.api + `/generator?${params}`).subscribe({
-            next: response => { this.generation = response; this.generating = false; },
+        const payload = { bank: this.bank, time: this.time, targetDate: this.generationDate, windowDays: this.generationWindowDays, quantity: this.generationQuantity };
+        this.http.post<GenerationResponse>(this.api + '/predictions/generate', payload).subscribe({
+            next: response => { this.generation = response; this.generating = false; this.loadPredictionHistory(); },
             error: error => { this.error = this.errorMessage(error); this.generating = false; }
+        });
+    }
+
+    loadPredictionHistory() {
+        this.http.get<any>(this.api + `/predictions?bank=${encodeURIComponent(this.bank)}&page=1&pageSize=10`).subscribe({
+            next: response => this.predictionHistory = response.items || [],
+            error: error => this.error = this.errorMessage(error)
         });
     }
 
