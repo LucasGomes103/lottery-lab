@@ -1,10 +1,10 @@
-<header><h1>Lottery Lab</h1><p>Dados corretos, estatísticas verificáveis e previsões experimentais</p></header>
+<header><div class="header-content"><div><h1>Lottery Lab</h1><p>Dados corretos, estatísticas verificáveis e previsões experimentais</p></div><nav aria-label="Menu principal"><button [class.active]="activeSection === 'import'" (click)="navigate('import')">Importação</button><button [class.active]="activeSection === 'history'" (click)="navigate('history')">Base histórica</button><button [class.active]="activeSection === 'analysis'" (click)="navigate('analysis')">Análises</button></nav></div></header>
 <main>
   <p *ngIf="message" class="notice success">{{message}}</p>
   <p *ngIf="error" class="notice error">{{error}}</p>
 
-  <section>
-    <h2>1. Importar resultados</h2>
+  <section *ngIf="activeSection === 'import'">
+    <h2>Importar resultados</h2>
     <p class="muted">Envie um PDF com texto ou imagem. Nada será salvo antes da sua confirmação.</p>
     <div class="upload-actions"><input type="file" accept="application/pdf,.pdf" (change)="select($event)" [disabled]="loading"><button type="button" class="secondary" (click)="startManualImport()" [disabled]="loading">Inserir manualmente</button></div>
     <span *ngIf="loading" class="loading"> Renderizando e lendo o PDF por OCR...</span>
@@ -38,17 +38,19 @@
     </div>
   </section>
 
-  <section>
-    <div class="section-head"><div><h2>2. Base histórica</h2><p class="muted">Confira o que já foi importado e corrija qualquer resultado.</p></div><button type="button" class="secondary" (click)="loadHistory()">Atualizar</button></div>
+  <section *ngIf="activeSection === 'history'">
+    <div class="section-head"><div><h2>Base histórica</h2><p class="muted">Confira o que já foi importado e corrija qualquer resultado.</p></div><span class="badge">{{historyTotal}} extrações</span></div>
     <div class="card">
+      <div class="history-filters"><label>Banca <input [(ngModel)]="historyBank" placeholder="Todas"></label><label>Data inicial <input type="date" [(ngModel)]="historyStartDate"></label><label>Data final <input type="date" [(ngModel)]="historyEndDate"></label><label>Horário <input type="time" [(ngModel)]="historyTime"></label><label>Itens por página <select [(ngModel)]="historyPageSize"><option [ngValue]="10">10</option><option [ngValue]="20">20</option><option [ngValue]="50">50</option><option [ngValue]="100">100</option></select></label><button type="button" (click)="loadHistory(1)">Filtrar</button><button type="button" class="secondary" (click)="clearHistoryFilters()">Limpar</button></div>
       <p *ngIf="loadingHistory" class="muted">Carregando histórico...</p>
-      <p *ngIf="!loadingHistory && !history.length" class="muted">Nenhuma extração importada para {{bank}}.</p>
+      <p *ngIf="!loadingHistory && !history.length" class="muted">Nenhuma extração encontrada com esses filtros.</p>
       <table *ngIf="history.length"><thead><tr><th>Data</th><th>Horário</th><th>Banca</th><th>Resultados</th><th></th></tr></thead><tbody><tr *ngFor="let item of history"><td>{{item.extraction_date | date:'dd/MM/yyyy'}}</td><td>{{item.extraction_time.slice(0,5)}}</td><td>{{item.bank}}</td><td>{{item.results}} de 7</td><td><button type="button" class="secondary small" (click)="editHistory(item.id)">Ver e editar</button></td></tr></tbody></table>
+      <div *ngIf="historyTotalPages > 1" class="pagination"><button type="button" class="secondary" (click)="loadHistory(historyPage - 1)" [disabled]="historyPage === 1">Anterior</button><span>Página <strong>{{historyPage}}</strong> de <strong>{{historyTotalPages}}</strong></span><button type="button" class="secondary" (click)="loadHistory(historyPage + 1)" [disabled]="historyPage === historyTotalPages">Próxima</button></div>
     </div>
   </section>
 
-  <section>
-    <h2>3. Análise experimental</h2>
+  <section *ngIf="activeSection === 'analysis'">
+    <h2>Análise experimental</h2>
     <div class="filters"><label>Banca <input [(ngModel)]="bank"></label><label>Horário <input type="time" [(ngModel)]="time"></label><label>Janela em dias <input type="number" min="1" [(ngModel)]="windowDays"></label><button (click)="analyze()">Calcular</button><button class="secondary" (click)="ask()">Explicar com IA</button></div>
     <div *ngIf="forecast" class="card"><h3>Ranking híbrido</h3><table><thead><tr><th>#</th><th>Dezena</th><th>Score</th><th>Continuidade</th><th>Atraso</th><th>Reversão</th></tr></thead><tbody><tr *ngFor="let result of forecast.dezenas"><td>{{result.rank}}</td><td>{{result.value}}</td><td>{{result.score}}</td><td>{{result.continuity}}</td><td>{{result.delay}}</td><td>{{result.reversal}}</td></tr></tbody></table><p class="warn">Score é um ranking heurístico, não uma probabilidade matemática.</p></div>
     <div *ngIf="backtest" class="card"><h3>Backtest atual</h3><p>Testes: <strong>{{backtest.tests}}</strong> · Acertos: <strong>{{backtest.hits}}</strong> · Taxa observada: <strong>{{backtest.hitRate}}%</strong></p></div>

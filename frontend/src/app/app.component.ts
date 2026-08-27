@@ -7,6 +7,7 @@ interface ParsedResult { position: number; number: string; milhar: string | null
 interface ParsedExtraction { date: string | null; bank: string; time: string | null; results: ParsedResult[]; warnings: string[]; }
 interface ImportPreview { fileName: string; sourceHash: string; usedOcr: boolean; extractions: ParsedExtraction[]; warnings: string[]; }
 interface HistoryItem { id: number; bank: string; extraction_date: string; extraction_time: string; results: number; }
+interface HistoryResponse { items: HistoryItem[]; total: number; page: number; pageSize: number; totalPages: number; }
 
 @Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule], templateUrl: './app.component.html' })
 export class AppComponent implements OnInit {
@@ -23,11 +24,27 @@ export class AppComponent implements OnInit {
     loadingHistory = false;
     editingId: number | null = null;
     history: HistoryItem[] = [];
+    activeSection: 'import' | 'history' | 'analysis' = 'import';
+    historyBank = 'LT NACIONAL';
+    historyStartDate = '';
+    historyEndDate = '';
+    historyTime = '';
+    historyPage = 1;
+    historyPageSize = 20;
+    historyTotal = 0;
+    historyTotalPages = 1;
     bank = 'LT NACIONAL';
     time = '21:00';
     windowDays = 15;
 
-    ngOnInit() { this.loadHistory(); }
+    ngOnInit() { this.loadHistory(1); }
+
+    navigate(section: 'import' | 'history' | 'analysis') {
+        this.activeSection = section;
+        this.error = '';
+        this.message = '';
+        if (section === 'history') this.loadHistory(this.historyPage);
+    }
 
     select(event: Event) {
         const file = (event.target as HTMLInputElement).files?.[0];
@@ -103,15 +120,21 @@ export class AppComponent implements OnInit {
             ? this.http.post<any>(this.api + '/imports/commit', this.preview)
             : this.http.put<any>(this.api + `/history/${this.editingId}`, this.preview.extractions[0]);
         request.subscribe({
-            next: response => { this.message = this.editingId === null ? `${response.count} extrações importadas com sucesso.` : 'Extração atualizada com sucesso.'; this.committing = false; this.preview = null; this.editingId = null; this.loadHistory(); },
+            next: response => { this.message = this.editingId === null ? `${response.count} extrações importadas com sucesso.` : 'Extração atualizada com sucesso.'; this.committing = false; this.preview = null; this.editingId = null; this.loadHistory(1); },
             error: error => { this.error = this.errorMessage(error); this.committing = false; }
         });
     }
 
-    loadHistory() {
+    loadHistory(page = 1) {
+        this.historyPage = Math.max(1, page);
         this.loadingHistory = true;
-        this.http.get<HistoryItem[]>(this.api + `/history?bank=${encodeURIComponent(this.bank)}&take=200`).subscribe({
-            next: history => { this.history = history; this.loadingHistory = false; },
+        const params = new URLSearchParams({ page: String(this.historyPage), pageSize: String(this.historyPageSize) });
+        if (this.historyBank.trim()) params.set('bank', this.historyBank.trim());
+        if (this.historyStartDate) params.set('startDate', this.historyStartDate);
+        if (this.historyEndDate) params.set('endDate', this.historyEndDate);
+        if (this.historyTime) params.set('time', this.historyTime);
+        this.http.get<HistoryResponse>(this.api + `/history?${params}`).subscribe({
+            next: response => { this.history = response.items; this.historyTotal = response.total; this.historyPage = response.page; this.historyTotalPages = response.totalPages; this.loadingHistory = false; },
             error: error => { this.error = this.errorMessage(error); this.loadingHistory = false; }
         });
     }
@@ -123,6 +146,7 @@ export class AppComponent implements OnInit {
                 this.prepareForReview(preview);
                 this.preview = preview;
                 this.editingId = id;
+                this.activeSection = 'import';
                 this.error = '';
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             },
@@ -131,6 +155,14 @@ export class AppComponent implements OnInit {
     }
 
     cancelReview() { this.preview = null; this.editingId = null; }
+
+    clearHistoryFilters() {
+        this.historyBank = '';
+        this.historyStartDate = '';
+        this.historyEndDate = '';
+        this.historyTime = '';
+        this.loadHistory(1);
+    }
 
     analyze() {
         this.http.get(this.api + `/forecast?bank=${encodeURIComponent(this.bank)}&time=${this.time}&windowDays=${this.windowDays}&top=10`).subscribe(x => this.forecast = x);

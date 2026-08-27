@@ -78,13 +78,37 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpGet("history")]
-    public async Task<IActionResult> History(string bank = "LT NACIONAL", int take = 100)
+    public async Task<IActionResult> History(
+        string? bank = null,
+        DateOnly? startDate = null,
+        DateOnly? endDate = null,
+        string? time = null,
+        int page = 1,
+        int pageSize = 20)
     {
-        take = Math.Clamp(take, 1, 500);
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 5, 100);
+        var where = new List<string>();
+        var parameters = new DynamicParameters();
+        if (!string.IsNullOrWhiteSpace(bank)) { where.Add("e.bank ilike @Bank"); parameters.Add("Bank", $"%{bank.Trim()}%"); }
+        if (startDate is not null) { where.Add("e.extraction_date >= @StartDate"); parameters.Add("StartDate", startDate.Value.ToDateTime(TimeOnly.MinValue)); }
+        if (endDate is not null) { where.Add("e.extraction_date <= @EndDate"); parameters.Add("EndDate", endDate.Value.ToDateTime(TimeOnly.MinValue)); }
+        if (!string.IsNullOrWhiteSpace(time))
+        {
+            if (!TimeOnly.TryParse(time, out _)) return BadRequest(new { message = "Horário de filtro inválido." });
+            where.Add("e.extraction_time = @Time::time"); parameters.Add("Time", time);
+        }
+        var whereSql = where.Count == 0 ? "" : "where " + string.Join(" and ", where);
+        parameters.Add("Offset", (page - 1) * pageSize);
+        parameters.Add("PageSize", pageSize);
+
         await using var connection = db.Open();
-        return Ok(await connection.QueryAsync(@"select e.id,e.bank,e.extraction_date,e.extraction_time,count(r.id) results
-            from extractions e left join results r on r.extraction_id=e.id where e.bank=@bank
-            group by e.id order by e.extraction_date desc,e.extraction_time desc limit @take", new { bank, take }));
+        var total = await connection.ExecuteScalarAsync<long>($"select count(*) from extractions e {whereSql}", parameters);
+        var items = await connection.QueryAsync($@"select e.id,e.bank,e.extraction_date,e.extraction_time,count(r.id) results
+            from extractions e left join results r on r.extraction_id=e.id {whereSql}
+            group by e.id order by e.extraction_date desc,e.extraction_time desc
+            offset @Offset limit @PageSize", parameters);
+        return Ok(new { items, total, page, pageSize, totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize)) });
     }
 
     [HttpGet("history/{id:long}")]
