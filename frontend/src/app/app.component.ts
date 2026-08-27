@@ -49,6 +49,9 @@ export class AppComponent implements OnInit {
     generationQuantity = 10;
     generationWindowDays = 90;
     generation: GenerationResponse | null = null;
+    animalTrends: any = null;
+    loadingAnimalTrends = false;
+    selectedAnimalGroups = new Set<number>();
     predictionHistory: any[] = [];
     selectedPrediction: any = null;
     loadingPrediction = false;
@@ -294,12 +297,30 @@ export class AppComponent implements OnInit {
     generateNumbers() {
         this.generating = true;
         this.error = '';
-        const payload = { bank: this.bank, time: this.time, targetDate: this.generationDate, windowDays: this.generationWindowDays, quantity: this.generationQuantity };
+        const payload = { bank: this.bank, time: this.time, targetDate: this.generationDate,
+            windowDays: this.generationWindowDays, quantity: this.generationQuantity,
+            groups: Array.from(this.selectedAnimalGroups) };
         this.http.post<GenerationResponse>(this.api + '/predictions/generate', payload).subscribe({
             next: response => { this.generation = response; this.generating = false; },
             error: error => { this.error = this.errorMessage(error); this.generating = false; }
         });
     }
+
+    analyzeAnimalTrends() {
+        this.loadingAnimalTrends = true;
+        const params = new URLSearchParams({ bank: this.bank, time: this.time, targetDate: this.generationDate,
+            windowDays: String(this.generationWindowDays) });
+        this.http.get<any>(this.api + `/predictions/animal-trends?${params}`).subscribe({
+            next: response => { this.animalTrends = response; this.loadingAnimalTrends = false; },
+            error: error => { this.error = this.errorMessage(error); this.loadingAnimalTrends = false; }
+        });
+    }
+
+    toggleAnimalGroup(group: number, selected: boolean) {
+        if (selected) this.selectedAnimalGroups.add(group); else this.selectedAnimalGroups.delete(group);
+    }
+
+    clearAnimalGroups() { this.selectedAnimalGroups.clear(); }
 
     loadPredictionHistory(page = 1) {
         this.predictionPage = Math.max(1, page);

@@ -1,6 +1,7 @@
 namespace LotteryLab.Api.Models;
 
-public record PredictionRequest(string Bank, string Time, DateOnly? TargetDate = null, int WindowDays = 90, int Quantity = 10);
+public record PredictionRequest(string Bank, string Time, DateOnly? TargetDate = null, int WindowDays = 90,
+    int Quantity = 10, List<int>? Groups = null);
 public record PredictionDeleteRequest(List<Guid> Ids);
 
 public record PredictionFeatures(
@@ -22,3 +23,8 @@ public record PredictionResponse(
 public record PredictionEvaluation(
     Guid PredictionId, long ExtractionId, bool HitMilhar, bool HitCentena, bool HitDezena,
     int? BestMilharPosition, int? BestCentenaPosition, int? BestDezenaPosition);
+
+public record AnimalTrend(int Rank, int Group, string Animal, List<string> Dezenas, double Score,
+    double Frequency, double RecentStrength, double Delay, List<string> Reasons);
+public record AnimalTrendResponse(string Bank, string Time, DateOnly TargetDate, int WindowDays,
+    int SampleExtractions, List<AnimalTrend> Animals, string Warning);

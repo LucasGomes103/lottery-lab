@@ -12,6 +12,9 @@ public sealed class PredictionService(Db db)
     private const string Algorithm = "HYBRID_EXPLORATION";
     private const int Version = 2;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly string[] Animals = ["AVESTRUZ", "AGUIA", "BURRO", "BORBOLETA", "CACHORRO", "CABRA",
+        "CARNEIRO", "CAMELO", "COBRA", "COELHO", "CAVALO", "ELEFANTE", "GALO", "GATO", "JACARE", "LEAO",
+        "MACACO", "PORCO", "PAVAO", "PERU", "TOURO", "TIGRE", "URSO", "VEADO", "VACA"];
 
     private sealed record Row(long ExtractionId, DateTime Date, TimeSpan Time, int Position, string Number);
     private sealed record Scored(string Milhar, string Centena, string Dezena, int Group,
@@ -30,7 +33,9 @@ public sealed class PredictionService(Db db)
         if (!TimeOnly.TryParse(request.Time, out var targetTime)) throw new ArgumentException("Horário inválido.");
         var windowDays = Math.Clamp(request.WindowDays, 7, 3650);
         var quantity = Math.Clamp(request.Quantity, 1, 100);
-        var seed = StableSeed($"{Algorithm}:{Version}:{bank}:{date:yyyy-MM-dd}:{targetTime:HH:mm}:{windowDays}:{quantity}");
+        var requestedGroups = (request.Groups ?? []).Where(x => x is >= 1 and <= 25).Distinct().Order().ToArray();
+        var groupKey = requestedGroups.Length == 0 ? "ALL" : string.Join('-', requestedGroups);
+        var seed = StableSeed($"{Algorithm}:{Version}:{bank}:{date:yyyy-MM-dd}:{targetTime:HH:mm}:{windowDays}:{quantity}:{groupKey}");
 
         await using var connection = db.Open();
         var target = date.ToDateTime(targetTime);
@@ -50,7 +55,9 @@ public sealed class PredictionService(Db db)
               where p.bank=@bank and p.target_time=@time::time order by p.generated_at desc limit 500",
             new { bank, time = targetTime.ToString("HH:mm") })).GroupBy(x => x).ToDictionary(x => x.Key, x => x.Count());
 
-        var selected = Select(Score(rows, targetTime, priorAppearances), quantity, seed);
+        var ranked = Score(rows, targetTime, priorAppearances);
+        if (requestedGroups.Length > 0) ranked = ranked.Where(x => requestedGroups.Contains(x.Group)).ToList();
+        var selected = Select(ranked, quantity, seed, requestedGroups.Length > 0);
         var id = Guid.NewGuid();
         var sampleExtractions = rows.Select(x => x.ExtractionId).Distinct().Count();
         var robustness = sampleExtractions < 30 ? "INSUFICIENTE" : sampleExtractions < 100 ? "BAIXA" : "EXPERIMENTAL";
@@ -59,7 +66,8 @@ public sealed class PredictionService(Db db)
             exploitation = selected.Count(x => x.SelectionType == "EXPLOITATION"),
             emerging = selected.Count(x => x.SelectionType == "EMERGING"),
             exploration = selected.Count(x => x.SelectionType == "EXPLORATION"),
-            deterministicSeed = seed
+            deterministicSeed = seed,
+            restrictedGroups = requestedGroups
         };
 
         await using var transaction = await connection.BeginTransactionAsync();
@@ -87,6 +95,45 @@ public sealed class PredictionService(Db db)
         return new PredictionResponse(id, Algorithm, Version, bank, targetTime.ToString("HH:mm"), date,
             windowDays, quantity, seed, sampleExtractions, rows.Count, robustness, composition, selected,
             "Os scores são rankings estatísticos, não probabilidades nem garantia de acerto. A vantagem deve ser confirmada por backtest fora da amostra.");
+    }
+
+    public async Task<AnimalTrendResponse> AnimalTrends(string bank, string time, DateOnly targetDate, int windowDays)
+    {
+        if (!TimeOnly.TryParse(time, out var targetTime)) throw new ArgumentException("Horário inválido.");
+        await using var connection = db.Open();
+        var rows = (await connection.QueryAsync<(long ExtractionId, DateTime Date, string Number)>(
+            @"select e.id as ExtractionId,e.extraction_date as Date,r.number as Number
+              from results r join extractions e on e.id=r.extraction_id
+              where e.bank=@bank and e.extraction_time=@time::time and e.extraction_date<@targetDate
+                and e.extraction_date>=@startDate and r.position between 1 and 6
+              order by e.extraction_date,r.position",
+            new { bank, time = targetTime.ToString("HH:mm"), targetDate = targetDate.ToDateTime(TimeOnly.MinValue),
+                startDate = targetDate.AddDays(-windowDays).ToDateTime(TimeOnly.MinValue) })).ToList();
+        var groups = rows.Select(x => GroupOf(x.Number)).ToList();
+        var recent = groups.TakeLast(60).ToList();
+        var frequencyCounts = groups.GroupBy(x => x).ToDictionary(x => x.Key, x => x.Count());
+        var recentCounts = recent.GroupBy(x => x).ToDictionary(x => x.Key, x => x.Count());
+        var maxFrequency = Math.Max(1, frequencyCounts.Values.DefaultIfEmpty().Max());
+        var maxRecent = Math.Max(1, recentCounts.Values.DefaultIfEmpty().Max());
+        var ranked = Enumerable.Range(1, 25).Select(group =>
+        {
+            var frequency = frequencyCounts.GetValueOrDefault(group) / (double)maxFrequency;
+            var recentStrength = recentCounts.GetValueOrDefault(group) / (double)maxRecent;
+            var last = groups.FindLastIndex(x => x == group);
+            var delay = last < 0 ? 1 : Math.Clamp((groups.Count - 1 - last) / 60d, 0, 1);
+            var score = 100 * (.50 * frequency + .40 * recentStrength + .10 * delay);
+            var reasons = new List<(double Value, string Text)> { (frequency, "frequência no horário"),
+                (recentStrength, "força nas últimas 10 extrações"), (delay, "atraso como sinal secundário") };
+            var dezenas = Enumerable.Range((group - 1) * 4 + 1, 4).Select(x => (x % 100).ToString("00")).ToList();
+            return new { group, score, frequency, recentStrength, delay, dezenas,
+                reasons = reasons.OrderByDescending(x => x.Value).Take(2).Select(x => x.Text).ToList() };
+        }).OrderByDescending(x => x.score).ThenBy(x => x.group)
+          .Select((x, index) => new AnimalTrend(index + 1, x.group, Animals[x.group - 1], x.dezenas,
+              Math.Round(x.score, 2), Math.Round(x.frequency * 100, 2), Math.Round(x.recentStrength * 100, 2),
+              Math.Round(x.delay * 100, 2), x.reasons)).ToList();
+        return new AnimalTrendResponse(bank, targetTime.ToString("HH:mm"), targetDate, windowDays,
+            rows.Select(x => x.ExtractionId).Distinct().Count(), ranked,
+            "Tendência é um ranking histórico descritivo e não altera a probabilidade matemática do sorteio.");
     }
 
     public async Task<object> List(string? bank, DateOnly? targetDate, string? time, string? status, int page, int pageSize)
@@ -321,7 +368,7 @@ public sealed class PredictionService(Db db)
         }).OrderByDescending(x => x.FinalScore).ThenBy(x => x.Milhar).ToList();
     }
 
-    private static List<PredictionCandidate> Select(List<Scored> ranked, int quantity, long seed)
+    private static List<PredictionCandidate> Select(List<Scored> ranked, int quantity, long seed, bool restrictedToGroups)
     {
         if (ranked.Count == 0) return [];
         var exploitationTarget = (int)Math.Round(quantity * .6, MidpointRounding.AwayFromZero);
@@ -331,7 +378,8 @@ public sealed class PredictionService(Db db)
         var usedC = new HashSet<string>(); var usedD = new HashSet<string>(); var groups = new Dictionary<int, int>();
         bool Add(Scored x, string type)
         {
-            if (usedC.Contains(x.Centena) || usedD.Contains(x.Dezena) || groups.GetValueOrDefault(x.Group) >= 2) return false;
+            if (usedC.Contains(x.Centena) || (!restrictedToGroups && usedD.Contains(x.Dezena)) ||
+                (!restrictedToGroups && groups.GetValueOrDefault(x.Group) >= 2)) return false;
             usedC.Add(x.Centena); usedD.Add(x.Dezena); groups[x.Group] = groups.GetValueOrDefault(x.Group) + 1;
             selected.Add((x, type)); return true;
         }

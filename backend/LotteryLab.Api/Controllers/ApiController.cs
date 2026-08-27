@@ -279,6 +279,16 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         return Ok(await predictions.GenerateAndSave(request));
     }
 
+    [HttpGet("predictions/animal-trends")]
+    public async Task<IActionResult> AnimalTrends(string bank = "LT NACIONAL", string time = "21:00",
+        DateOnly? targetDate = null, int windowDays = 90)
+    {
+        if (string.IsNullOrWhiteSpace(bank)) return BadRequest(new { message = "Informe a banca." });
+        if (!TimeOnly.TryParse(time, out _)) return BadRequest(new { message = "Horário inválido." });
+        var date = targetDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
+        return Ok(await predictions.AnimalTrends(bank.Trim(), time, date, Math.Clamp(windowDays, 7, 3650)));
+    }
+
     [HttpGet("predictions")]
     public async Task<IActionResult> Predictions(string? bank = null, DateOnly? targetDate = null,
         string? time = null, string? status = null, int page = 1, int pageSize = 20)
