@@ -16,6 +16,10 @@ public sealed class PredictionService(Db db)
     private sealed record Row(long ExtractionId, DateTime Date, TimeSpan Time, int Position, string Number);
     private sealed record Scored(string Milhar, string Centena, string Dezena, int Group,
         double StatisticalScore, double FinalScore, PredictionFeatures Features, List<string> Reasons);
+    private sealed record StoredCandidate(int Rank, string Milhar, string Centena, string Dezena, int Group,
+        string SelectionType, double StatisticalScore, double FinalScore, string FeaturesJson, string ReasonsJson);
+    private sealed record EvaluationRow(long ExtractionId, bool HitMilhar, bool HitCentena, bool HitDezena,
+        int? BestMilharPosition, int? BestCentenaPosition, int? BestDezenaPosition, DateTime EvaluatedAt);
 
     public async Task<PredictionResponse> GenerateAndSave(PredictionRequest request)
     {
@@ -76,18 +80,26 @@ public sealed class PredictionService(Db db)
                     features = JsonSerializer.Serialize(candidate.Features, JsonOptions),
                     reasons = JsonSerializer.Serialize(candidate.Reasons, JsonOptions) }, transaction);
         await transaction.CommitAsync();
+        await EvaluatePending(bank, date, targetTime.ToString("HH:mm"));
 
         return new PredictionResponse(id, Algorithm, Version, bank, targetTime.ToString("HH:mm"), date,
             windowDays, quantity, seed, sampleExtractions, rows.Count, robustness, composition, selected,
             "Os scores são rankings estatísticos, não probabilidades nem garantia de acerto. A vantagem deve ser confirmada por backtest fora da amostra.");
     }
 
-    public async Task<object> List(string? bank, int page, int pageSize)
+    public async Task<object> List(string? bank, DateOnly? targetDate, string? time, string? status, int page, int pageSize)
     {
         page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 5, 100);
         await using var connection = db.Open();
-        var filter = string.IsNullOrWhiteSpace(bank) ? "" : "where p.bank ilike @bank";
-        var args = new { bank = $"%{bank?.Trim()}%", offset = (page - 1) * pageSize, pageSize };
+        var where = new List<string>();
+        var args = new DynamicParameters();
+        if (!string.IsNullOrWhiteSpace(bank)) { where.Add("p.bank ilike @bank"); args.Add("bank", $"%{bank.Trim()}%"); }
+        if (targetDate is not null) { where.Add("p.target_date=@targetDate"); args.Add("targetDate", targetDate.Value.ToDateTime(TimeOnly.MinValue)); }
+        if (!string.IsNullOrWhiteSpace(time)) { where.Add("p.target_time=@time::time"); args.Add("time", time); }
+        if (!string.IsNullOrWhiteSpace(status)) { where.Add("p.status=@status"); args.Add("status", status.Trim().ToUpperInvariant()); }
+        var filter = where.Count == 0 ? "" : "where " + string.Join(" and ", where);
+        args.Add("offset", (page - 1) * pageSize);
+        args.Add("pageSize", pageSize);
         var total = await connection.ExecuteScalarAsync<long>($"select count(*) from predictions p {filter}", args);
         var items = await connection.QueryAsync($@"select p.id,p.bank,p.target_date,p.target_time,p.algorithm_code,
             p.algorithm_version,p.quantity,p.robustness,p.status,p.generated_at,
@@ -102,9 +114,56 @@ public sealed class PredictionService(Db db)
         await using var connection = db.Open();
         var prediction = await connection.QuerySingleOrDefaultAsync("select * from predictions where id=@id", new { id });
         if (prediction is null) return null;
-        var candidates = await connection.QueryAsync("select * from prediction_candidates where prediction_id=@id order by rank", new { id });
-        var evaluation = await connection.QuerySingleOrDefaultAsync("select * from prediction_evaluations where prediction_id=@id", new { id });
-        return new { prediction, candidates, evaluation };
+        var candidates = (await connection.QueryAsync<StoredCandidate>(
+            @"select rank,milhar,centena,dezena,group_no as ""Group"",selection_type as SelectionType,
+                     statistical_score as StatisticalScore,final_score as FinalScore,
+                     features::text as FeaturesJson,reasons::text as ReasonsJson
+              from prediction_candidates where prediction_id=@id order by rank", new { id })).ToList();
+        var evaluation = await connection.QuerySingleOrDefaultAsync<EvaluationRow>(
+            @"select extraction_id as ExtractionId,hit_milhar as HitMilhar,hit_centena as HitCentena,
+                     hit_dezena as HitDezena,best_milhar_position as BestMilharPosition,
+                     best_centena_position as BestCentenaPosition,best_dezena_position as BestDezenaPosition,
+                     evaluated_at as EvaluatedAt
+              from prediction_evaluations where prediction_id=@id", new { id });
+        var actual = evaluation is null ? [] : (await connection.QueryAsync<(int Position, string Number)>(
+            "select position,number from results where extraction_id=@id and position between 1 and 6 order by position",
+            new { id = evaluation.ExtractionId })).ToList();
+        var detailed = candidates.Select(candidate =>
+        {
+            var milharMatches = actual.Where(x => x.Number == candidate.Milhar).Select(x => new { x.Position, x.Number }).ToList();
+            var centenaMatches = actual.Where(x => x.Number.EndsWith(candidate.Centena)).Select(x => new { x.Position, x.Number }).ToList();
+            var dezenaMatches = actual.Where(x => x.Number.EndsWith(candidate.Dezena)).Select(x => new { x.Position, x.Number }).ToList();
+            return new
+            {
+                candidate.Rank, candidate.Milhar, candidate.Centena, candidate.Dezena, candidate.Group,
+                candidate.SelectionType, candidate.StatisticalScore, candidate.FinalScore,
+                Features = JsonSerializer.Deserialize<JsonElement>(candidate.FeaturesJson),
+                Reasons = JsonSerializer.Deserialize<List<string>>(candidate.ReasonsJson) ?? [],
+                Hits = new
+                {
+                    Milhar = milharMatches.Count > 0, Centena = centenaMatches.Count > 0, Dezena = dezenaMatches.Count > 0,
+                    MilharMatches = milharMatches, CentenaMatches = centenaMatches, DezenaMatches = dezenaMatches
+                }
+            };
+        }).ToList();
+        return new
+        {
+            prediction,
+            candidates = detailed,
+            evaluation,
+            actualResults = actual.Select(x => new
+            {
+                x.Position, x.Number, Centena = x.Number[^3..], Dezena = x.Number[^2..], Group = GroupOf(x.Number)
+            })
+        };
+    }
+
+    public async Task<int> Delete(IEnumerable<Guid> ids)
+    {
+        var uniqueIds = ids.Distinct().ToArray();
+        if (uniqueIds.Length == 0) return 0;
+        await using var connection = db.Open();
+        return await connection.ExecuteAsync("delete from predictions where id=any(@ids)", new { ids = uniqueIds });
     }
 
     public async Task EvaluatePending(string bank, DateOnly date, string time)

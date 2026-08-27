@@ -1,6 +1,7 @@
 namespace LotteryLab.Api.Models;
 
 public record PredictionRequest(string Bank, string Time, DateOnly? TargetDate = null, int WindowDays = 90, int Quantity = 10);
+public record PredictionDeleteRequest(List<Guid> Ids);
 
 public record PredictionFeatures(
     double Frequency, double TimeFrequency, double Delay, double Continuity,

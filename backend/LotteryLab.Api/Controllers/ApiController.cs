@@ -280,14 +280,36 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpGet("predictions")]
-    public async Task<IActionResult> Predictions(string? bank = null, int page = 1, int pageSize = 20) =>
-        Ok(await predictions.List(bank, page, pageSize));
+    public async Task<IActionResult> Predictions(string? bank = null, DateOnly? targetDate = null,
+        string? time = null, string? status = null, int page = 1, int pageSize = 20)
+    {
+        if (!string.IsNullOrWhiteSpace(time) && !TimeOnly.TryParse(time, out _))
+            return BadRequest(new { message = "Horário de filtro inválido." });
+        if (!string.IsNullOrWhiteSpace(status) && status is not ("PENDING" or "EVALUATED"))
+            return BadRequest(new { message = "Situação de filtro inválida." });
+        return Ok(await predictions.List(bank, targetDate, time, status, page, pageSize));
+    }
 
     [HttpGet("predictions/{id:guid}")]
     public async Task<IActionResult> Prediction(Guid id)
     {
         var result = await predictions.Detail(id);
         return result is null ? NotFound(new { message = "Previsão não encontrada." }) : Ok(result);
+    }
+
+    [HttpDelete("predictions/{id:guid}")]
+    public async Task<IActionResult> DeletePrediction(Guid id)
+    {
+        var count = await predictions.Delete([id]);
+        return count == 0 ? NotFound(new { message = "Previsão não encontrada." }) : Ok(new { count, message = "Previsão excluída." });
+    }
+
+    [HttpPost("predictions/delete-batch")]
+    public async Task<IActionResult> DeletePredictions(PredictionDeleteRequest request)
+    {
+        if (request.Ids.Count == 0) return BadRequest(new { message = "Selecione ao menos uma previsão." });
+        var count = await predictions.Delete(request.Ids);
+        return Ok(new { count, message = $"{count} previsões excluídas." });
     }
 
     [HttpGet("backtest")]

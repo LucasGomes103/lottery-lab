@@ -33,7 +33,7 @@ export class AppComponent implements OnInit {
     editingIds: number[] = [];
     selectedHistoryIds = new Set<number>();
     history: HistoryItem[] = [];
-    activeSection: 'import' | 'history' | 'analysis' = 'import';
+    activeSection: 'import' | 'history' | 'analysis' | 'predictions' = 'import';
     historyBank = 'LT NACIONAL';
     historyStartDate = '';
     historyEndDate = '';
@@ -50,15 +50,28 @@ export class AppComponent implements OnInit {
     generationWindowDays = 90;
     generation: GenerationResponse | null = null;
     predictionHistory: any[] = [];
+    selectedPrediction: any = null;
+    loadingPrediction = false;
+    loadingPredictions = false;
+    predictionBank = 'LT NACIONAL';
+    predictionDate = '';
+    predictionTime = '';
+    predictionStatusFilter = '';
+    predictionPage = 1;
+    predictionPageSize = 20;
+    predictionTotal = 0;
+    predictionTotalPages = 1;
+    selectedPredictionIds = new Set<string>();
     generating = false;
 
     ngOnInit() { this.loadHistory(1); }
 
-    navigate(section: 'import' | 'history' | 'analysis') {
+    navigate(section: 'import' | 'history' | 'analysis' | 'predictions') {
         this.activeSection = section;
         this.error = '';
         this.message = '';
         if (section === 'history') this.loadHistory(this.historyPage);
+        if (section === 'predictions') this.loadPredictionHistory(this.predictionPage);
     }
 
     select(event: Event) {
@@ -276,16 +289,84 @@ export class AppComponent implements OnInit {
         this.error = '';
         const payload = { bank: this.bank, time: this.time, targetDate: this.generationDate, windowDays: this.generationWindowDays, quantity: this.generationQuantity };
         this.http.post<GenerationResponse>(this.api + '/predictions/generate', payload).subscribe({
-            next: response => { this.generation = response; this.generating = false; this.loadPredictionHistory(); },
+            next: response => { this.generation = response; this.generating = false; },
             error: error => { this.error = this.errorMessage(error); this.generating = false; }
         });
     }
 
-    loadPredictionHistory() {
-        this.http.get<any>(this.api + `/predictions?bank=${encodeURIComponent(this.bank)}&page=1&pageSize=10`).subscribe({
-            next: response => this.predictionHistory = response.items || [],
+    loadPredictionHistory(page = 1) {
+        this.predictionPage = Math.max(1, page);
+        this.loadingPredictions = true;
+        const params = new URLSearchParams({ page: String(this.predictionPage), pageSize: String(this.predictionPageSize) });
+        if (this.predictionBank.trim()) params.set('bank', this.predictionBank.trim());
+        if (this.predictionDate) params.set('targetDate', this.predictionDate);
+        if (this.predictionTime) params.set('time', this.predictionTime);
+        if (this.predictionStatusFilter) params.set('status', this.predictionStatusFilter);
+        this.http.get<any>(this.api + `/predictions?${params}`).subscribe({
+            next: response => {
+                this.predictionHistory = response.items || [];
+                this.predictionTotal = response.total;
+                this.predictionPage = response.page;
+                this.predictionTotalPages = response.totalPages;
+                this.selectedPredictionIds.clear();
+                this.loadingPredictions = false;
+            },
+            error: error => { this.error = this.errorMessage(error); this.loadingPredictions = false; }
+        });
+    }
+
+    clearPredictionFilters() {
+        this.predictionBank = '';
+        this.predictionDate = '';
+        this.predictionTime = '';
+        this.predictionStatusFilter = '';
+        this.loadPredictionHistory(1);
+    }
+
+    togglePredictionSelection(id: string, selected: boolean) {
+        if (selected) this.selectedPredictionIds.add(id); else this.selectedPredictionIds.delete(id);
+    }
+
+    togglePredictionPageSelection() {
+        const allSelected = this.predictionHistory.length > 0 && this.predictionHistory.every(item => this.selectedPredictionIds.has(item.id));
+        for (const item of this.predictionHistory)
+            allSelected ? this.selectedPredictionIds.delete(item.id) : this.selectedPredictionIds.add(item.id);
+    }
+
+    deletePrediction(id: string) {
+        if (!window.confirm('Excluir esta previsão e toda a conferência associada? A base histórica não será alterada.')) return;
+        this.http.delete<any>(this.api + `/predictions/${id}`).subscribe({
+            next: response => { this.message = response.message; if (this.selectedPrediction?.prediction?.id === id) this.selectedPrediction = null; this.loadPredictionHistory(this.predictionPage); },
             error: error => this.error = this.errorMessage(error)
         });
+    }
+
+    deleteSelectedPredictions() {
+        const ids = Array.from(this.selectedPredictionIds);
+        if (!ids.length || !window.confirm(`Excluir as ${ids.length} previsões selecionadas? A base histórica não será alterada.`)) return;
+        this.http.post<any>(this.api + '/predictions/delete-batch', { ids }).subscribe({
+            next: response => { this.message = response.message; this.selectedPrediction = null; this.loadPredictionHistory(this.predictionPage); },
+            error: error => this.error = this.errorMessage(error)
+        });
+    }
+
+    viewPrediction(id: string) {
+        this.loadingPrediction = true;
+        this.selectedPrediction = null;
+        this.http.get<any>(this.api + `/predictions/${id}`).subscribe({
+            next: response => { this.selectedPrediction = response; this.loadingPrediction = false; },
+            error: error => { this.error = this.errorMessage(error); this.loadingPrediction = false; }
+        });
+    }
+
+    closePrediction() { this.selectedPrediction = null; }
+
+    predictionStatus(item: any) {
+        return item.status === 'EVALUATED' ? 'Conferida' : 'Aguardando resultado';
+    }
+
+    matchLabel(matches: Array<{ position: number; number: string }>) {
+        return matches?.map(match => `${match.position}º: ${match.number}`).join(', ') || '';
     }
 
     ask() {
