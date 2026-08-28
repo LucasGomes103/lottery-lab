@@ -25,6 +25,10 @@ export class AppComponent implements OnInit {
     error = '';
     loading = false;
     queueProcessing = false;
+    syncDate = this.localDate();
+    syncingExternal = false;
+    externalSyncStatus: any = null;
+    externalSyncResult: any = null;
     importQueue: ImportQueueItem[] = [];
     activeQueueId: number | null = null;
     committing = false;
@@ -73,7 +77,7 @@ export class AppComponent implements OnInit {
     dashboardTime = '';
     generating = false;
 
-    ngOnInit() { this.loadHistory(1); }
+    ngOnInit() { this.loadHistory(1); this.loadExternalSyncStatus(); }
 
     navigate(section: 'import' | 'history' | 'analysis' | 'predictions' | 'dashboard') {
         this.activeSection = section;
@@ -165,6 +169,31 @@ export class AppComponent implements OnInit {
         this.activeQueueId = null;
         this.error = '';
         this.message = '';
+    }
+
+    syncExternalResults() {
+        if (this.syncingExternal) return;
+        this.syncingExternal = true;
+        this.error = '';
+        this.http.post<any>(this.api + `/imports/sync?date=${this.syncDate}`, {}).subscribe({
+            next: response => {
+                this.externalSyncResult = response;
+                this.syncingExternal = false;
+                this.message = response.inserted
+                    ? `${response.inserted} horários ausentes foram importados automaticamente.`
+                    : 'A base já está atualizada com todos os resultados disponíveis.';
+                this.loadExternalSyncStatus();
+                this.loadHistory(1);
+            },
+            error: error => { this.error = this.errorMessage(error); this.syncingExternal = false; }
+        });
+    }
+
+    loadExternalSyncStatus() {
+        this.http.get<any>(this.api + '/imports/sync/status').subscribe({
+            next: response => this.externalSyncStatus = response,
+            error: () => this.externalSyncStatus = null
+        });
     }
 
     normalize(result: ParsedResult) {

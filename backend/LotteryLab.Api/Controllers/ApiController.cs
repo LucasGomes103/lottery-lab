@@ -9,7 +9,7 @@ namespace LotteryLab.Api.Controllers;
 [ApiController]
 [Route("api")]
 public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService analysis, AiService ai,
-    NumberGeneratorService generator, PredictionService predictions) : ControllerBase
+    NumberGeneratorService generator, PredictionService predictions, ExternalResultsService externalResults) : ControllerBase
 {
     [HttpPost("imports/preview")]
     [RequestSizeLimit(20_000_000)]
@@ -26,6 +26,18 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         catch (InvalidDataException exception) { return BadRequest(new { message = exception.Message }); }
         catch (InvalidOperationException exception) { return UnprocessableEntity(new { message = exception.Message }); }
     }
+
+    [HttpPost("imports/sync")]
+    public async Task<IActionResult> SyncExternalResults(DateOnly? date, CancellationToken cancellationToken)
+    {
+        var target = date ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
+        if (target > DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3)))
+            return BadRequest(new { message = "Não é possível sincronizar uma data futura." });
+        return Ok(await externalResults.Sync(target, cancellationToken));
+    }
+
+    [HttpGet("imports/sync/status")]
+    public IActionResult ExternalSyncStatus() => Ok(externalResults.Status());
 
     [HttpPost("imports/commit")]
     public async Task<IActionResult> Commit(ImportPreview preview)

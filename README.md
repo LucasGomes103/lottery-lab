@@ -38,6 +38,11 @@ Acesse:
 5. Rode Forecast e Backtest.
 6. Opcional: use "Analisar com IA".
 
+## Sincronização automática
+A API consulta periodicamente a fonte pública `https://resultadonacional.com/resultado/busca` e insere apenas horários ausentes da banca `LT NACIONAL`. Somente registros com loteria `Nacional`, tipo `TD` e exatamente sete prêmios são aceitos; resultados de `26 da Sorte` são descartados. Registros existentes nunca são sobrescritos pela sincronização externa. Há também uma ação manual na tela de importação.
+
+O processo roda a cada cinco minutos enquanto o backend estiver ativo. Em hospedagens que suspendem o serviço por inatividade, como instâncias gratuitas, a regularidade depende de o serviço estar acordado; ao iniciar novamente, uma nova sincronização é executada.
+
 ## PDFs escaneados
 O importador tenta primeiro a camada textual com PdfPig. Quando não encontra horários/resultados suficientes, renderiza as páginas com Poppler e executa Tesseract OCR automaticamente. O container do backend já instala `poppler-utils`, `tesseract-ocr` e o idioma português.
 
@@ -102,6 +107,8 @@ A IA recebe resultados agregados do Forecast/Backtest. O banco continua sendo a 
 ## Endpoints
 - `POST /api/imports/preview` — multipart PDF, com fallback OCR e múltiplos horários
 - `POST /api/imports/commit` — confirma todas as extrações revisadas da prévia
+- `POST /api/imports/sync?date=2026-08-28` — busca e insere horários ausentes da fonte externa
+- `GET /api/imports/sync/status` — informa a última execução automática
 - `GET /api/history`
 - `GET /api/forecast?bank=LT%20NACIONAL&time=21:00&windowDays=15&top=10`
 - `GET /api/backtest?...`

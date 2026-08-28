@@ -13,6 +13,14 @@ builder.Services.AddScoped<AnalysisService>();
 builder.Services.AddScoped<AiService>();
 builder.Services.AddScoped<NumberGeneratorService>();
 builder.Services.AddScoped<PredictionService>();
+builder.Services.AddSingleton<ExternalResultsState>();
+builder.Services.AddHttpClient<ExternalResultsService>(client =>
+{
+    client.BaseAddress = new Uri("https://resultadonacional.com/");
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("LotteryLab/1.0 (+result synchronization)");
+});
+builder.Services.AddHostedService<ExternalResultsWorker>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ??
     ["https://lottery-lab.gomeslucas103.workers.dev", "http://localhost:4200"];
 builder.Services.AddCors(o => o.AddPolicy("web", p => p.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
