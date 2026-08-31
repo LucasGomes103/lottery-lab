@@ -46,7 +46,7 @@ public sealed class PredictionService(Db db)
               from results r join extractions e on e.id=r.extraction_id
               where e.bank=@bank and e.extraction_date>=@start
                 and (e.extraction_date<@date or (e.extraction_date=@date and e.extraction_time<@time::time))
-                and r.position between 1 and 6
+                and r.position between 1 and 5
               order by e.extraction_date,e.extraction_time,r.position",
             new { bank, start = start.Date, date = target.Date, time = targetTime.ToString("HH:mm") })).ToList();
 
@@ -105,7 +105,7 @@ public sealed class PredictionService(Db db)
             @"select e.id as ExtractionId,e.extraction_date as Date,r.number as Number
               from results r join extractions e on e.id=r.extraction_id
               where e.bank=@bank and e.extraction_time=@time::time and e.extraction_date<@targetDate
-                and e.extraction_date>=@startDate and r.position between 1 and 6
+                and e.extraction_date>=@startDate and r.position between 1 and 5
               order by e.extraction_date,r.position",
             new { bank, time = targetTime.ToString("HH:mm"), targetDate = targetDate.ToDateTime(TimeOnly.MinValue),
                 startDate = targetDate.AddDays(-windowDays).ToDateTime(TimeOnly.MinValue) })).ToList();
@@ -182,12 +182,12 @@ public sealed class PredictionService(Db db)
                      evaluated_at as EvaluatedAt
               from prediction_evaluations where prediction_id=@id", new { id });
         var actual = evaluation is null ? [] : (await connection.QueryAsync<(int Position, string Number)>(
-            "select position,number from results where extraction_id=@id and position between 1 and 6 order by position",
+            "select position,number from results where extraction_id=@id and position between 1 and 5 order by position",
             new { id = evaluation.ExtractionId })).ToList();
         var dayResults = (await connection.QueryAsync<(TimeSpan Time, int Position, string Number)>(
             @"select e.extraction_time as Time,r.position as Position,r.number as Number
               from extractions e join results r on r.extraction_id=e.id
-              where e.bank=@bank and e.extraction_date=@date and r.position between 1 and 6
+              where e.bank=@bank and e.extraction_date=@date and r.position between 1 and 5
               order by e.extraction_time,r.position",
             new { bank = target.Bank, date = target.TargetDate.Date })).ToList();
         var beforeTarget = dayResults.Where(x => x.Time < target.TargetTime).ToList();
@@ -323,7 +323,7 @@ public sealed class PredictionService(Db db)
             new { bank, date = date.ToDateTime(TimeOnly.MinValue), time });
         if (extraction is null) return;
         var actual = (await connection.QueryAsync<(int Position, string Number)>(
-            "select position,number from results where extraction_id=@id and position between 1 and 6", new { id = extraction })).ToList();
+            "select position,number from results where extraction_id=@id and position between 1 and 5", new { id = extraction })).ToList();
         var predictions = await connection.QueryAsync<Guid>(
             @"select id from predictions where bank=@bank and target_date=@date and target_time=@time::time",
             new { bank, date = date.ToDateTime(TimeOnly.MinValue), time });
@@ -356,6 +356,22 @@ public sealed class PredictionService(Db db)
                     hitDezena = dezenaPos is not null, milharHitCount, centenaHitCount, dezenaHitCount,
                     milharPos, centenaPos, dezenaPos, details });
         }
+    }
+
+    public async Task<int> ReevaluateAll()
+    {
+        List<PredictionTarget> targets;
+        await using (var connection = db.Open())
+        {
+            targets = (await connection.QueryAsync<PredictionTarget>(
+                @"select distinct bank as Bank,target_date as TargetDate,target_time as TargetTime
+                  from predictions order by target_date,target_time")).ToList();
+        }
+
+        foreach (var target in targets)
+            await EvaluatePending(target.Bank, DateOnly.FromDateTime(target.TargetDate),
+                $"{target.TargetTime.Hours:00}:{target.TargetTime.Minutes:00}");
+        return targets.Count;
     }
 
     private static List<Scored> Score(List<Row> rows, TimeOnly targetTime, Dictionary<string, int> priorAppearances)

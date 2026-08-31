@@ -16,7 +16,7 @@ public sealed class NumberGeneratorService(Db db)
               from results r join extractions e on e.id=r.extraction_id
               where e.bank=@bank and e.extraction_time=@time::time
                 and e.extraction_date < @target and e.extraction_date >= @start
-                and r.position between 1 and 6
+                and r.position between 1 and 5
               order by e.extraction_date, r.position",
             new { bank, time, target, start })).ToList();
 

@@ -27,6 +27,8 @@ builder.Services.AddCors(o => o.AddPolicy("web", p => p.WithOrigins(origins).All
 
 var app = builder.Build();
 await app.Services.GetRequiredService<PredictionSchema>().Initialize();
+await using (var scope = app.Services.CreateAsyncScope())
+    await scope.ServiceProvider.GetRequiredService<PredictionService>().ReevaluateAll();
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 app.UseCors("web"); app.MapControllers();
 app.MapGet("/health", () => Results.Ok(new { status = "ok", utc = DateTime.UtcNow }));

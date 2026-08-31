@@ -5,7 +5,7 @@ namespace LotteryLab.Api.Services;
 public sealed class AnalysisService(Db db) {
   public async Task<ForecastResponse> Forecast(string bank,string time,int windowDays,int top) {
     using var c=db.Open();
-    var rows=(await c.QueryAsync<dynamic>(@"select e.extraction_date, r.dezena from results r join extractions e on e.id=r.extraction_id where e.bank=@bank and e.extraction_time=@time::time and e.extraction_date >= current_date-@windowDays order by e.extraction_date", new{bank,time,windowDays})).ToList();
+    var rows=(await c.QueryAsync<dynamic>(@"select e.extraction_date, r.dezena from results r join extractions e on e.id=r.extraction_id where e.bank=@bank and e.extraction_time=@time::time and e.extraction_date >= current_date-@windowDays and r.position between 1 and 5 order by e.extraction_date", new{bank,time,windowDays})).ToList();
     var all=Enumerable.Range(0,100).Select(i=>i.ToString("00")).ToList();
     var freq=rows.GroupBy(x=>(string)x.dezena).ToDictionary(g=>g.Key,g=>g.Count());
     var dates=rows.GroupBy(x=>(string)x.dezena).ToDictionary(g=>g.Key,g=>((DateTime)g.Max(x=>x.extraction_date)).Date);
@@ -22,7 +22,7 @@ public sealed class AnalysisService(Db db) {
   }
   public async Task<object> Backtest(string bank,string time,int windowDays,int top) {
     using var c=db.Open();
-    var rows=(await c.QueryAsync<(DateTime date,string dezena)>(@"select e.extraction_date as date, r.dezena from results r join extractions e on e.id=r.extraction_id where e.bank=@bank and e.extraction_time=@time::time order by e.extraction_date",new{bank,time})).ToList();
+    var rows=(await c.QueryAsync<(DateTime date,string dezena)>(@"select e.extraction_date as date, r.dezena from results r join extractions e on e.id=r.extraction_id where e.bank=@bank and e.extraction_time=@time::time and r.position between 1 and 5 order by e.extraction_date",new{bank,time})).ToList();
     var days=rows.GroupBy(x=>x.date.Date).OrderBy(g=>g.Key).ToList();
     var outcomes=new List<(DateTime Date,bool Frequency,bool Delay,bool Random)>();
     for(int i=1;i<days.Count;i++) {
