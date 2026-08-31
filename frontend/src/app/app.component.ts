@@ -531,6 +531,29 @@ export class AppComponent implements OnInit {
         if (this.selectedPrediction) this.downloadPredictionExcel(this.selectedPrediction);
     }
 
+    copyGeneratedValues(type: 'milhar' | 'centena' | 'dezena') {
+        this.copyValues(this.generation?.numbers || [], type);
+    }
+
+    copySelectedValues(type: 'milhar' | 'centena' | 'dezena') {
+        this.copyValues(this.selectedPrediction?.candidates || [], type);
+    }
+
+    private async copyValues(candidates: any[], type: 'milhar' | 'centena' | 'dezena') {
+        const text = candidates.map(candidate => String(candidate[type] ?? '')).filter(Boolean).join(' ');
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch {
+            const area = document.createElement('textarea');
+            area.value = text; area.style.position = 'fixed'; area.style.opacity = '0';
+            document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove();
+        }
+        const labels = { milhar: 'milhares', centena: 'centenas', dezena: 'dezenas' };
+        this.message = `${candidates.length} ${labels[type]} copiadas, separadas por espaço.`;
+        this.error = '';
+    }
+
     private downloadPredictionExcel(detail: any) {
         const prediction = detail.prediction;
         const evaluated = !!detail.evaluation;
