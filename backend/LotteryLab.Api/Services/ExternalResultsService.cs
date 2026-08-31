@@ -129,9 +129,13 @@ public sealed class ExternalResultsWorker(IServiceScopeFactory scopeFactory, ILo
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var service = scope.ServiceProvider.GetRequiredService<ExternalResultsService>();
+                var rioService = scope.ServiceProvider.GetRequiredService<RioExternalResultsService>();
                 var zone = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
                 var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, zone).DateTime);
-                await service.Sync(today, stoppingToken);
+                try { await service.Sync(today, stoppingToken); }
+                catch (Exception exception) { logger.LogWarning(exception, "Falha na sincronização da Nacional; PT RIO continuará."); }
+                try { await rioService.Sync(today, stoppingToken); }
+                catch (Exception exception) { logger.LogWarning(exception, "Falha na sincronização da PT RIO; Nacional continuará."); }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception) { logger.LogWarning(exception, "Sincronização automática será tentada novamente."); }

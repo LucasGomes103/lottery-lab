@@ -26,6 +26,8 @@ export class AppComponent implements OnInit {
     loading = false;
     queueProcessing = false;
     syncDate = this.localDate();
+    syncBank = 'LT NACIONAL';
+    readonly bankOptions = ['LT NACIONAL', 'PT RIO'];
     syncingExternal = false;
     externalSyncStatus: any = null;
     externalSyncResult: any = null;
@@ -175,7 +177,7 @@ export class AppComponent implements OnInit {
         if (this.syncingExternal) return;
         this.syncingExternal = true;
         this.error = '';
-        this.http.post<any>(this.api + `/imports/sync?date=${this.syncDate}`, {}).subscribe({
+        this.http.post<any>(this.api + `/imports/sync?date=${this.syncDate}&bank=${encodeURIComponent(this.syncBank)}`, {}).subscribe({
             next: response => {
                 this.externalSyncResult = response;
                 this.syncingExternal = false;
@@ -194,6 +196,25 @@ export class AppComponent implements OnInit {
             next: response => this.externalSyncStatus = response,
             error: () => this.externalSyncStatus = null
         });
+    }
+
+    selectedSyncStatus() {
+        return this.syncBank === 'PT RIO' ? this.externalSyncStatus?.rio : this.externalSyncStatus?.national;
+    }
+
+    expectedResultCount(bank: string) { return bank === 'PT RIO' ? 5 : 7; }
+
+    setExtractionBank(extraction: ParsedExtraction, bank: string) {
+        extraction.bank = bank;
+        const count = this.expectedResultCount(bank);
+        extraction.results = extraction.results.slice(0, count);
+        while (extraction.results.length < count)
+            extraction.results.push(this.emptyResult(extraction.results.length + 1));
+    }
+
+    selectAnalysisBank(bank: string) {
+        this.bank = bank;
+        this.generation = null; this.animalTrends = null; this.forecast = null; this.backtest = null;
     }
 
     normalize(result: ParsedResult) {
@@ -373,7 +394,7 @@ export class AppComponent implements OnInit {
     }
 
     clearPredictionFilters() {
-        this.predictionBank = '';
+        this.predictionBank = 'LT NACIONAL';
         this.predictionDate = '';
         this.predictionTime = '';
         this.predictionStatusFilter = '';
@@ -421,7 +442,7 @@ export class AppComponent implements OnInit {
     }
 
     clearDashboardFilters() {
-        this.dashboardBank = '';
+        this.dashboardBank = 'LT NACIONAL';
         this.dashboardStartDate = '';
         this.dashboardEndDate = '';
         this.dashboardTime = '';

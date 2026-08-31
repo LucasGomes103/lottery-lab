@@ -9,7 +9,8 @@ namespace LotteryLab.Api.Controllers;
 [ApiController]
 [Route("api")]
 public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService analysis, AiService ai,
-    NumberGeneratorService generator, PredictionService predictions, ExternalResultsService externalResults) : ControllerBase
+    NumberGeneratorService generator, PredictionService predictions, ExternalResultsService externalResults,
+    RioExternalResultsService rioExternalResults) : ControllerBase
 {
     [HttpPost("imports/preview")]
     [RequestSizeLimit(20_000_000)]
@@ -28,16 +29,21 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpPost("imports/sync")]
-    public async Task<IActionResult> SyncExternalResults(DateOnly? date, CancellationToken cancellationToken)
+    public async Task<IActionResult> SyncExternalResults(DateOnly? date, string bank = "LT NACIONAL", CancellationToken cancellationToken = default)
     {
         var target = date ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
         if (target > DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3)))
             return BadRequest(new { message = "Não é possível sincronizar uma data futura." });
-        return Ok(await externalResults.Sync(target, cancellationToken));
+        var normalizedBank = bank.Trim().ToUpperInvariant();
+        if (normalizedBank is not ("LT NACIONAL" or "PT RIO"))
+            return BadRequest(new { message = "Banca inválida. Escolha LT NACIONAL ou PT RIO." });
+        return normalizedBank == RioExternalResultsService.Bank
+            ? Ok(await rioExternalResults.Sync(target, cancellationToken))
+            : Ok(await externalResults.Sync(target, cancellationToken));
     }
 
     [HttpGet("imports/sync/status")]
-    public IActionResult ExternalSyncStatus() => Ok(externalResults.Status());
+    public IActionResult ExternalSyncStatus() => Ok(new { national = externalResults.Status(), rio = rioExternalResults.Status() });
 
     [HttpPost("imports/commit")]
     public async Task<IActionResult> Commit(ImportPreview preview)
@@ -373,13 +379,15 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
             if (string.IsNullOrWhiteSpace(extraction.Bank)) errors.Add($"{label}: banca ausente.");
             if (extraction.Date is null) errors.Add($"{label}: data ausente.");
             if (!TimeOnly.TryParse(extraction.Time, out _)) errors.Add($"{label}: horário inválido.");
-            if (extraction.Results.Count != 7) errors.Add($"{label}: são necessários exatamente sete resultados.");
+            var expectedResults = extraction.Bank.Trim().Equals(RioExternalResultsService.Bank, StringComparison.OrdinalIgnoreCase) ? 5 : 7;
+            if (extraction.Results.Count != expectedResults)
+                errors.Add($"{label}: são necessários exatamente {expectedResults} resultados.");
             if (extraction.Results.Select(x => x.Position).Distinct().Count() != extraction.Results.Count) errors.Add($"{label}: posições repetidas.");
             foreach (var result in extraction.Results)
             {
                 var digits = new string((result.Number ?? "").Where(char.IsDigit).ToArray());
                 var length = result.Position == 7 ? 3 : 4;
-                if (result.Position is < 1 or > 7 || digits.Length != length)
+                if (result.Position < 1 || result.Position > expectedResults || digits.Length != length)
                     errors.Add($"{label}: resultado da posição {result.Position} deve possuir {length} dígitos.");
             }
         }
