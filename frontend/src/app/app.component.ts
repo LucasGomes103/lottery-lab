@@ -79,7 +79,7 @@ export class AppComponent implements OnInit {
     dashboardTime = '';
     generating = false;
 
-    ngOnInit() { this.loadHistory(1); this.loadExternalSyncStatus(); }
+    ngOnInit() { this.setNextTarget(); this.loadHistory(1); this.loadExternalSyncStatus(); }
 
     navigate(section: 'import' | 'history' | 'analysis' | 'predictions' | 'dashboard') {
         this.activeSection = section;
@@ -214,7 +214,34 @@ export class AppComponent implements OnInit {
 
     selectAnalysisBank(bank: string) {
         this.bank = bank;
+        this.setNextTarget();
         this.generation = null; this.animalTrends = null; this.forecast = null; this.backtest = null;
+    }
+
+    setNextTarget() {
+        const now = new Date();
+        let targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        let schedules = this.schedulesFor(this.bank, targetDate);
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        let next = schedules.find(value => this.minutes(value) > currentMinutes);
+        if (!next) {
+            targetDate.setDate(targetDate.getDate() + 1);
+            schedules = this.schedulesFor(this.bank, targetDate);
+            next = schedules[0];
+        }
+        this.generationDate = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+        this.time = next;
+    }
+
+    private schedulesFor(bank: string, date: Date) {
+        if (bank === 'PT RIO') return date.getDay() === 0
+            ? ['14:00', '16:00'] : ['09:00', '11:00', '14:00', '16:00', '18:00', '21:00'];
+        return ['02:00', '08:00', '10:00', '12:00', '15:00', '17:00', '21:00', '23:00'];
+    }
+
+    private minutes(value: string) {
+        const [hour, minute] = value.split(':').map(Number);
+        return hour * 60 + minute;
     }
 
     normalize(result: ParsedResult) {

@@ -374,6 +374,63 @@ public sealed class PredictionService(Db db)
         return targets.Count;
     }
 
+    public async Task<object> CompareWindows(string bank, DateOnly date, int quantity, int[] requestedWindows,
+        bool useSameDayResults)
+    {
+        quantity = Math.Clamp(quantity, 1, 100);
+        var windows = requestedWindows.Where(x => x is >= 7 and <= 3650).Distinct().Order().ToArray();
+        if (windows.Length == 0) windows = [30, 60, 90, 120, 180, 240];
+        await using var connection = db.Open();
+        var schedules = (await connection.QueryAsync<TimeSpan>(
+            @"select distinct extraction_time from extractions
+              where bank=@bank and extraction_date=@date order by extraction_time",
+            new { bank, date = date.ToDateTime(TimeOnly.MinValue) })).ToList();
+        var comparisons = new List<object>();
+
+        foreach (var windowDays in windows)
+        {
+            var scheduleResults = new List<object>();
+            var totalMilhar = 0; var totalCentena = 0; var totalDezena = 0;
+            foreach (var schedule in schedules)
+            {
+                var targetTime = TimeOnly.FromTimeSpan(schedule);
+                var target = date.ToDateTime(targetTime);
+                var rows = (await connection.QueryAsync<Row>(
+                    @"select e.id as ExtractionId,e.extraction_date as Date,e.extraction_time as Time,
+                             r.position as Position,r.number as Number
+                      from results r join extractions e on e.id=r.extraction_id
+                      where e.bank=@bank and e.extraction_date>=@start
+                        and (e.extraction_date<@date or (@useSameDayResults and e.extraction_date=@date and e.extraction_time<@time::time))
+                        and r.position between 1 and 5
+                      order by e.extraction_date,e.extraction_time,r.position",
+                    new { bank, start = target.AddDays(-windowDays).Date, date = target.Date,
+                        time = targetTime.ToString("HH:mm"), useSameDayResults })).ToList();
+                var priorAppearances = (await connection.QueryAsync<string>(
+                    @"select pc.milhar from prediction_candidates pc join predictions p on p.id=pc.prediction_id
+                      where p.bank=@bank and p.target_time=@time::time and p.target_date<@date
+                      order by p.generated_at desc limit 500",
+                    new { bank, time = targetTime.ToString("HH:mm"), date = target.Date }))
+                    .GroupBy(x => x).ToDictionary(x => x.Key, x => x.Count());
+                var seed = StableSeed($"{Algorithm}:{Version}:{bank}:{date:yyyy-MM-dd}:{targetTime:HH:mm}:{windowDays}:{quantity}:ALL");
+                var selected = Select(Score(rows, targetTime, priorAppearances), quantity, seed, false);
+                var actual = (await connection.QueryAsync<string>(
+                    @"select r.number from results r join extractions e on e.id=r.extraction_id
+                      where e.bank=@bank and e.extraction_date=@date and e.extraction_time=@time::time
+                        and r.position between 1 and 5 order by r.position",
+                    new { bank, date = target.Date, time = targetTime.ToString("HH:mm") })).ToList();
+                var milhar = selected.Sum(c => actual.Count(x => x == c.Milhar));
+                var centena = selected.Sum(c => actual.Count(x => x.EndsWith(c.Centena)));
+                var dezena = selected.Sum(c => actual.Count(x => x.EndsWith(c.Dezena)));
+                totalMilhar += milhar; totalCentena += centena; totalDezena += dezena;
+                scheduleResults.Add(new { time = targetTime.ToString("HH:mm"), sampleExtractions = rows.Select(x => x.ExtractionId).Distinct().Count(),
+                    milharHits = milhar, centenaHits = centena, dezenaHits = dezena });
+            }
+            comparisons.Add(new { windowDays, evaluatedSchedules = schedules.Count, milharHits = totalMilhar,
+                centenaHits = totalCentena, dezenaHits = totalDezena, schedules = scheduleResults });
+        }
+        return new { bank, date, quantity, prizeRange = "1-5", useSameDayResults, comparisons };
+    }
+
     private static List<Scored> Score(List<Row> rows, TimeOnly targetTime, Dictionary<string, int> priorAppearances)
     {
         if (rows.Count == 0) return [];

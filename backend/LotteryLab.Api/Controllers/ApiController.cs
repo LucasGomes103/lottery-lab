@@ -334,6 +334,17 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         return Ok(await predictions.Statistics(bank, startDate, endDate, time));
     }
 
+    [HttpGet("predictions/window-backtest")]
+    public async Task<IActionResult> PredictionWindowBacktest(string bank = "LT NACIONAL", DateOnly? date = null,
+        int quantity = 28, string windows = "30,60,90,120,180,240", bool useSameDayResults = false)
+    {
+        if (string.IsNullOrWhiteSpace(bank)) return BadRequest(new { message = "Informe a banca." });
+        var parsedWindows = windows.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => int.TryParse(x, out var value) ? value : 0).ToArray();
+        var target = date ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
+        return Ok(await predictions.CompareWindows(bank.Trim(), target, quantity, parsedWindows, useSameDayResults));
+    }
+
     [HttpPost("predictions/{id:guid}/evaluate")]
     public async Task<IActionResult> EvaluatePrediction(Guid id)
     {
