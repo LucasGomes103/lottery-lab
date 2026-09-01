@@ -81,6 +81,21 @@ public sealed class PredictionSchema(Db db)
         alter table prediction_evaluations add column if not exists centena_hit_count integer not null default 0;
         alter table prediction_evaluations add column if not exists dezena_hit_count integer not null default 0;
 
+        create table if not exists data_migrations (
+            code varchar(120) primary key,
+            applied_at timestamptz not null default now()
+        );
+
+        do $migration$
+        begin
+            if not exists(select 1 from data_migrations where code = 'remove-pt-rio-20260901') then
+                delete from predictions where upper(trim(bank)) = 'PT RIO';
+                delete from extractions where upper(trim(bank)) = 'PT RIO';
+                insert into data_migrations(code) values('remove-pt-rio-20260901');
+            end if;
+        end
+        $migration$;
+
         insert into algorithm_versions(code, version, name, weights, config, is_production)
         values(
             'HYBRID_EXPLORATION', 2, 'Motor híbrido com exploração controlada',

@@ -26,8 +26,6 @@ export class AppComponent implements OnInit {
     loading = false;
     queueProcessing = false;
     syncDate = this.localDate();
-    syncBank = 'LT NACIONAL';
-    readonly bankOptions = ['LT NACIONAL', 'PT RIO'];
     syncingExternal = false;
     externalSyncStatus: any = null;
     externalSyncResult: any = null;
@@ -177,7 +175,7 @@ export class AppComponent implements OnInit {
         if (this.syncingExternal) return;
         this.syncingExternal = true;
         this.error = '';
-        this.http.post<any>(this.api + `/imports/sync?date=${this.syncDate}&bank=${encodeURIComponent(this.syncBank)}`, {}).subscribe({
+        this.http.post<any>(this.api + `/imports/sync?date=${this.syncDate}`, {}).subscribe({
             next: response => {
                 this.externalSyncResult = response;
                 this.syncingExternal = false;
@@ -198,44 +196,22 @@ export class AppComponent implements OnInit {
         });
     }
 
-    selectedSyncStatus() {
-        return this.syncBank === 'PT RIO' ? this.externalSyncStatus?.rio : this.externalSyncStatus?.national;
-    }
-
-    expectedResultCount(bank: string) { return bank === 'PT RIO' ? 5 : 7; }
-
-    setExtractionBank(extraction: ParsedExtraction, bank: string) {
-        extraction.bank = bank;
-        const count = this.expectedResultCount(bank);
-        extraction.results = extraction.results.slice(0, count);
-        while (extraction.results.length < count)
-            extraction.results.push(this.emptyResult(extraction.results.length + 1));
-    }
-
-    selectAnalysisBank(bank: string) {
-        this.bank = bank;
-        this.setNextTarget();
-        this.generation = null; this.animalTrends = null; this.forecast = null; this.backtest = null;
-    }
-
     setNextTarget() {
         const now = new Date();
         let targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        let schedules = this.schedulesFor(this.bank, targetDate);
+        let schedules = this.schedulesFor();
         const currentMinutes = now.getHours() * 60 + now.getMinutes();
         let next = schedules.find(value => this.minutes(value) > currentMinutes);
         if (!next) {
             targetDate.setDate(targetDate.getDate() + 1);
-            schedules = this.schedulesFor(this.bank, targetDate);
+            schedules = this.schedulesFor();
             next = schedules[0];
         }
         this.generationDate = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
         this.time = next;
     }
 
-    private schedulesFor(bank: string, date: Date) {
-        if (bank === 'PT RIO') return date.getDay() === 0
-            ? ['14:00', '16:00'] : ['09:00', '11:00', '14:00', '16:00', '18:00', '21:00'];
+    private schedulesFor() {
         return ['02:00', '08:00', '10:00', '12:00', '15:00', '17:00', '21:00', '23:00'];
     }
 
@@ -359,7 +335,7 @@ export class AppComponent implements OnInit {
     cancelReview() { this.preview = null; this.editingId = null; this.editingIds = []; this.activeQueueId = null; }
 
     clearHistoryFilters() {
-        this.historyBank = '';
+        this.historyBank = 'LT NACIONAL';
         this.historyStartDate = '';
         this.historyEndDate = '';
         this.historyTime = '';

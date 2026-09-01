@@ -14,18 +14,11 @@ builder.Services.AddScoped<AiService>();
 builder.Services.AddScoped<NumberGeneratorService>();
 builder.Services.AddScoped<PredictionService>();
 builder.Services.AddSingleton<ExternalResultsState>();
-builder.Services.AddSingleton<RioExternalResultsState>();
 builder.Services.AddHttpClient<ExternalResultsService>(client =>
 {
     client.BaseAddress = new Uri("https://resultadonacional.com/");
     client.Timeout = TimeSpan.FromSeconds(30);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("LotteryLab/1.0 (+result synchronization)");
-});
-builder.Services.AddHttpClient<RioExternalResultsService>(client =>
-{
-    client.BaseAddress = new Uri("https://www.resultadofacil.com.br/");
-    client.Timeout = TimeSpan.FromSeconds(30);
-    client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; LotteryLab/1.0; result synchronization)");
 });
 builder.Services.AddHostedService<ExternalResultsWorker>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ??

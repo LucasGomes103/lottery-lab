@@ -9,8 +9,7 @@ namespace LotteryLab.Api.Controllers;
 [ApiController]
 [Route("api")]
 public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService analysis, AiService ai,
-    NumberGeneratorService generator, PredictionService predictions, ExternalResultsService externalResults,
-    RioExternalResultsService rioExternalResults) : ControllerBase
+    NumberGeneratorService generator, PredictionService predictions, ExternalResultsService externalResults) : ControllerBase
 {
     [HttpPost("imports/preview")]
     [RequestSizeLimit(20_000_000)]
@@ -29,21 +28,16 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpPost("imports/sync")]
-    public async Task<IActionResult> SyncExternalResults(DateOnly? date, string bank = "LT NACIONAL", CancellationToken cancellationToken = default)
+    public async Task<IActionResult> SyncExternalResults(DateOnly? date, CancellationToken cancellationToken = default)
     {
         var target = date ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
         if (target > DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3)))
             return BadRequest(new { message = "Não é possível sincronizar uma data futura." });
-        var normalizedBank = bank.Trim().ToUpperInvariant();
-        if (normalizedBank is not ("LT NACIONAL" or "PT RIO"))
-            return BadRequest(new { message = "Banca inválida. Escolha LT NACIONAL ou PT RIO." });
-        return normalizedBank == RioExternalResultsService.Bank
-            ? Ok(await rioExternalResults.Sync(target, cancellationToken))
-            : Ok(await externalResults.Sync(target, cancellationToken));
+        return Ok(await externalResults.Sync(target, cancellationToken));
     }
 
     [HttpGet("imports/sync/status")]
-    public IActionResult ExternalSyncStatus() => Ok(new { national = externalResults.Status(), rio = rioExternalResults.Status() });
+    public IActionResult ExternalSyncStatus() => Ok(externalResults.Status());
 
     [HttpPost("imports/commit")]
     public async Task<IActionResult> Commit(ImportPreview preview)
@@ -283,7 +277,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         int windowDays = 90,
         int quantity = 10)
     {
-        if (string.IsNullOrWhiteSpace(bank)) return BadRequest(new { message = "Informe a banca." });
+        if (!IsNational(bank)) return BadRequest(new { message = "Somente a banca LT NACIONAL é aceita." });
         if (!TimeOnly.TryParse(time, out _)) return BadRequest(new { message = "Horário inválido." });
         var date = targetDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
         return Ok(await generator.Generate(bank.Trim(), time, date, Math.Clamp(windowDays, 7, 3650), Math.Clamp(quantity, 1, 100)));
@@ -292,7 +286,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     [HttpPost("predictions/generate")]
     public async Task<IActionResult> GeneratePrediction(PredictionRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Bank)) return BadRequest(new { message = "Informe a banca." });
+        if (!IsNational(request.Bank)) return BadRequest(new { message = "Somente a banca LT NACIONAL é aceita." });
         if (!TimeOnly.TryParse(request.Time, out _)) return BadRequest(new { message = "Horário inválido." });
         return Ok(await predictions.GenerateAndSave(request));
     }
@@ -301,7 +295,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     public async Task<IActionResult> AnimalTrends(string bank = "LT NACIONAL", string time = "21:00",
         DateOnly? targetDate = null, int windowDays = 90)
     {
-        if (string.IsNullOrWhiteSpace(bank)) return BadRequest(new { message = "Informe a banca." });
+        if (!IsNational(bank)) return BadRequest(new { message = "Somente a banca LT NACIONAL é aceita." });
         if (!TimeOnly.TryParse(time, out _)) return BadRequest(new { message = "Horário inválido." });
         var date = targetDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
         return Ok(await predictions.AnimalTrends(bank.Trim(), time, date, Math.Clamp(windowDays, 7, 3650)));
@@ -338,7 +332,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     public async Task<IActionResult> PredictionWindowBacktest(string bank = "LT NACIONAL", DateOnly? date = null,
         int quantity = 28, string windows = "30,60,90,120,180,240", bool useSameDayResults = false)
     {
-        if (string.IsNullOrWhiteSpace(bank)) return BadRequest(new { message = "Informe a banca." });
+        if (!IsNational(bank)) return BadRequest(new { message = "Somente a banca LT NACIONAL é aceita." });
         var parsedWindows = windows.Split(',', StringSplitOptions.RemoveEmptyEntries)
             .Select(x => int.TryParse(x, out var value) ? value : 0).ToArray();
         var target = date ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
@@ -387,10 +381,11 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         foreach (var extraction in preview.Extractions)
         {
             var label = $"{extraction.Bank} {extraction.Date} {extraction.Time}";
-            if (string.IsNullOrWhiteSpace(extraction.Bank)) errors.Add($"{label}: banca ausente.");
+            if (!extraction.Bank.Trim().Equals("LT NACIONAL", StringComparison.OrdinalIgnoreCase))
+                errors.Add($"{label}: somente a banca LT NACIONAL é aceita.");
             if (extraction.Date is null) errors.Add($"{label}: data ausente.");
             if (!TimeOnly.TryParse(extraction.Time, out _)) errors.Add($"{label}: horário inválido.");
-            var expectedResults = extraction.Bank.Trim().Equals(RioExternalResultsService.Bank, StringComparison.OrdinalIgnoreCase) ? 5 : 7;
+            const int expectedResults = 7;
             if (extraction.Results.Count != expectedResults)
                 errors.Add($"{label}: são necessários exatamente {expectedResults} resultados.");
             if (extraction.Results.Select(x => x.Position).Distinct().Count() != extraction.Results.Count) errors.Add($"{label}: posições repetidas.");
@@ -419,4 +414,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
 
     private static string ExtractionKey(string bank, DateOnly date, string time) =>
         $"{bank.Trim()}|{date:yyyy-MM-dd}|{TimeOnly.Parse(time):HH:mm}";
+
+    private static bool IsNational(string? bank) =>
+        bank?.Trim().Equals("LT NACIONAL", StringComparison.OrdinalIgnoreCase) == true;
 }

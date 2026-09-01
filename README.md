@@ -39,7 +39,7 @@ Acesse:
 6. Opcional: use "Analisar com IA".
 
 ## Sincronização automática
-A API sincroniza separadamente as bancas `LT NACIONAL` e `PT RIO`, inserindo somente horários ausentes. A Nacional usa `resultadonacional.com`; a PT RIO usa os dados estruturados de `resultadofacil.com.br`, com horários 09h, 11h, 14h, 16h, 18h e 21h de segunda a sábado e somente 14h e 16h aos domingos. Resultados federais presentes na página da PT RIO são ignorados. Registros existentes nunca são sobrescritos pela sincronização externa.
+A API sincroniza os resultados da `LT NACIONAL` pelo `resultadonacional.com`, inserindo somente horários ausentes. Registros existentes nunca são sobrescritos pela sincronização externa.
 
 O processo roda a cada cinco minutos enquanto o backend estiver ativo. Em hospedagens que suspendem o serviço por inatividade, como instâncias gratuitas, a regularidade depende de o serviço estar acordado; ao iniciar novamente, uma nova sincronização é executada.
 
