@@ -37,7 +37,7 @@ export class AppComponent implements OnInit {
     editingIds: number[] = [];
     selectedHistoryIds = new Set<number>();
     history: HistoryItem[] = [];
-    activeSection: 'import' | 'history' | 'analysis' | 'predictions' | 'dashboard' = 'import';
+    activeSection: 'import' | 'history' | 'analysis' | 'predictions' | 'dashboard' | 'users' | 'account' = 'import';
     historyBank = 'LT NACIONAL';
     historyStartDate = '';
     historyEndDate = '';
@@ -76,16 +76,116 @@ export class AppComponent implements OnInit {
     dashboardEndDate = '';
     dashboardTime = '';
     generating = false;
+    authReady = false;
+    currentUser: any = null;
+    loginUsername = '';
+    loginPassword = '';
+    loggingIn = false;
+    currentPassword = '';
+    newPassword = '';
+    confirmPassword = '';
+    users: any[] = [];
+    editingUser: any = null;
+    userForm = { username: '', displayName: '', password: '', isActive: true, permissions: [] as string[] };
+    readonly permissionOptions = [
+        { value: 'imports.write', label: 'Importar e sincronizar resultados' },
+        { value: 'history.read', label: 'Consultar a base histórica' },
+        { value: 'history.write', label: 'Editar a base histórica' },
+        { value: 'analysis.use', label: 'Usar análises e tendências' },
+        { value: 'predictions.read', label: 'Consultar previsões' },
+        { value: 'predictions.write', label: 'Gerar, verificar e excluir previsões' },
+        { value: 'dashboard.read', label: 'Consultar o dashboard' },
+        { value: 'users.manage', label: 'Gerenciar usuários' }
+    ];
 
-    ngOnInit() { this.setNextTarget(); this.loadHistory(1); this.loadExternalSyncStatus(); }
+    ngOnInit() {
+        const token = localStorage.getItem('lotteryLabToken');
+        if (!token) { this.authReady = true; return; }
+        this.http.get<any>(this.api + '/auth/me').subscribe({
+            next: user => { this.currentUser = user; this.authReady = true; this.afterLogin(); },
+            error: () => { localStorage.removeItem('lotteryLabToken'); this.authReady = true; }
+        });
+    }
 
-    navigate(section: 'import' | 'history' | 'analysis' | 'predictions' | 'dashboard') {
+    login() {
+        if (this.loggingIn) return;
+        this.loggingIn = true; this.error = '';
+        this.http.post<any>(this.api + '/auth/login', { username: this.loginUsername, password: this.loginPassword }).subscribe({
+            next: response => {
+                localStorage.setItem('lotteryLabToken', response.token);
+                this.currentUser = response.user; this.loginPassword = ''; this.loggingIn = false; this.afterLogin();
+            },
+            error: error => { this.error = this.errorMessage(error); this.loggingIn = false; }
+        });
+    }
+
+    logout() {
+        this.http.post(this.api + '/auth/logout', {}).subscribe({ next: () => this.finishLogout(), error: () => this.finishLogout() });
+    }
+
+    changePassword() {
+        if (this.newPassword !== this.confirmPassword) { this.error = 'A confirmação da nova senha não confere.'; return; }
+        this.http.post<any>(this.api + '/auth/change-password', { currentPassword: this.currentPassword, newPassword: this.newPassword }).subscribe({
+            next: response => { this.message = response.message; this.currentPassword = ''; this.newPassword = ''; this.confirmPassword = ''; this.finishLogout(); },
+            error: error => this.error = this.errorMessage(error)
+        });
+    }
+
+    hasPermission(permission: string) { return this.currentUser?.role === 'ADMIN' || this.currentUser?.permissions?.includes(permission); }
+
+    private afterLogin() {
+        this.setNextTarget();
+        if (this.currentUser?.mustChangePassword) return;
+        if (this.hasPermission('imports.write')) { this.activeSection = 'import'; this.loadExternalSyncStatus(); }
+        else if (this.hasPermission('history.read')) { this.activeSection = 'history'; this.loadHistory(1); }
+        else if (this.hasPermission('predictions.read')) { this.activeSection = 'predictions'; this.loadPredictionHistory(1); }
+        else if (this.hasPermission('dashboard.read')) { this.activeSection = 'dashboard'; this.loadDashboard(); }
+        else if (this.hasPermission('analysis.use')) this.activeSection = 'analysis';
+        if (this.hasPermission('users.manage')) this.loadUsers();
+    }
+
+    private finishLogout() { localStorage.removeItem('lotteryLabToken'); this.currentUser = null; }
+
+    navigate(section: 'import' | 'history' | 'analysis' | 'predictions' | 'dashboard' | 'users' | 'account') {
         this.activeSection = section;
         this.error = '';
         this.message = '';
         if (section === 'history') this.loadHistory(this.historyPage);
         if (section === 'predictions') this.loadPredictionHistory(this.predictionPage);
         if (section === 'dashboard') this.loadDashboard();
+        if (section === 'users') this.loadUsers();
+    }
+
+    loadUsers() {
+        this.http.get<any[]>(this.api + '/auth/users').subscribe({ next: users => this.users = users, error: error => this.error = this.errorMessage(error) });
+    }
+
+    startCreateUser() {
+        this.editingUser = null;
+        this.userForm = { username: '', displayName: '', password: '', isActive: true, permissions: [] };
+    }
+
+    editUser(user: any) {
+        this.editingUser = user;
+        this.userForm = { username: user.username, displayName: user.display_name, password: '', isActive: user.is_active, permissions: [...(user.permissions || [])] };
+    }
+
+    toggleUserPermission(permission: string, checked: boolean) {
+        this.userForm.permissions = checked
+            ? Array.from(new Set([...this.userForm.permissions, permission]))
+            : this.userForm.permissions.filter(value => value !== permission);
+    }
+
+    saveUser() {
+        const request = this.editingUser
+            ? this.http.put<any>(this.api + `/auth/users/${this.editingUser.id}`, { displayName: this.userForm.displayName, isActive: this.userForm.isActive, permissions: this.userForm.permissions, newPassword: this.userForm.password || null })
+            : this.http.post<any>(this.api + '/auth/users', { username: this.userForm.username, displayName: this.userForm.displayName, password: this.userForm.password, permissions: this.userForm.permissions });
+        request.subscribe({ next: () => { this.message = this.editingUser ? 'Usuário atualizado.' : 'Usuário criado.'; this.startCreateUser(); this.loadUsers(); }, error: error => this.error = this.errorMessage(error) });
+    }
+
+    deleteUser(user: any) {
+        if (!window.confirm(`Excluir o usuário ${user.username}?`)) return;
+        this.http.delete<any>(this.api + `/auth/users/${user.id}`).subscribe({ next: response => { this.message = response.message; this.loadUsers(); }, error: error => this.error = this.errorMessage(error) });
     }
 
     select(event: Event) {

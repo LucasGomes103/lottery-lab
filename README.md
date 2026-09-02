@@ -43,6 +43,12 @@ A API sincroniza os resultados da `LT NACIONAL` pelo `resultadonacional.com`, in
 
 O processo roda a cada cinco minutos enquanto o backend estiver ativo. Em hospedagens que suspendem o serviço por inatividade, como instâncias gratuitas, a regularidade depende de o serviço estar acordado; ao iniciar novamente, uma nova sincronização é executada.
 
+## Acesso e segurança
+
+Todas as rotas de dados exigem uma sessão autenticada e a permissão correspondente. As sessões expiram em sete dias, podem ser encerradas pelo usuário e ficam armazenadas no banco apenas como hash. Senhas usam PBKDF2-SHA256 com salt individual. No primeiro deploy da autenticação é criado um administrador inicial, que precisa trocar a senha antes de acessar qualquer área do sistema.
+
+Sem autenticação, ficam disponíveis somente `POST /api/auth/login`, `GET /health`, as respostas de preflight CORS e os arquivos estáticos da tela de login. A gestão de usuários permite conceder acessos separados para importação, histórico, análises, previsões, dashboard e administração de contas.
+
 ## PDFs escaneados
 O importador tenta primeiro a camada textual com PdfPig. Quando não encontra horários/resultados suficientes, renderiza as páginas com Poppler e executa Tesseract OCR automaticamente. O container do backend já instala `poppler-utils`, `tesseract-ocr` e o idioma português.
 

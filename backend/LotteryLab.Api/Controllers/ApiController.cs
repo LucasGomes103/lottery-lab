@@ -2,16 +2,20 @@ using Dapper;
 using LotteryLab.Api.Data;
 using LotteryLab.Api.Models;
 using LotteryLab.Api.Services;
+using LotteryLab.Api.Security;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LotteryLab.Api.Controllers;
 
 [ApiController]
 [Route("api")]
+[Authorize]
 public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService analysis, AiService ai,
     NumberGeneratorService generator, PredictionService predictions, ExternalResultsService externalResults) : ControllerBase
 {
     [HttpPost("imports/preview")]
+    [Authorize(Policy = Permissions.ImportsWrite)]
     [RequestSizeLimit(20_000_000)]
     public async Task<IActionResult> Preview(IFormFile? file, CancellationToken cancellationToken)
     {
@@ -28,6 +32,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpPost("imports/sync")]
+    [Authorize(Policy = Permissions.ImportsWrite)]
     public async Task<IActionResult> SyncExternalResults(DateOnly? date, CancellationToken cancellationToken = default)
     {
         var target = date ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
@@ -37,9 +42,11 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpGet("imports/sync/status")]
+    [Authorize(Policy = Permissions.ImportsWrite)]
     public IActionResult ExternalSyncStatus() => Ok(externalResults.Status());
 
     [HttpPost("imports/commit")]
+    [Authorize(Policy = Permissions.ImportsWrite)]
     public async Task<IActionResult> Commit(ImportPreview preview)
     {
         var validationErrors = Validate(preview);
@@ -108,6 +115,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpGet("history")]
+    [Authorize(Policy = Permissions.HistoryRead)]
     public async Task<IActionResult> History(
         string? bank = null,
         DateOnly? startDate = null,
@@ -142,6 +150,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpGet("history/{id:long}")]
+    [Authorize(Policy = Permissions.HistoryRead)]
     public async Task<IActionResult> HistoryDetail(long id)
     {
         await using var connection = db.Open();
@@ -161,6 +170,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpPut("history/{id:long}")]
+    [Authorize(Policy = Permissions.HistoryWrite)]
     public async Task<IActionResult> UpdateHistory(long id, ParsedExtraction extraction)
     {
         var preview = new ImportPreview("edicao-manual", $"edit-{id}", false, [extraction], []);
@@ -208,6 +218,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpPut("history/batch")]
+    [Authorize(Policy = Permissions.HistoryWrite)]
     public async Task<IActionResult> UpdateHistoryBatch(BatchHistoryUpdate request)
     {
         if (request.Items.Count == 0) return BadRequest(new { message = "Selecione ao menos uma extração." });
@@ -266,10 +277,12 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpGet("forecast")]
+    [Authorize(Policy = Permissions.AnalysisUse)]
     public async Task<IActionResult> Forecast(string bank = "LT NACIONAL", string time = "21:00", int windowDays = 15, int top = 8) =>
         Ok(await analysis.Forecast(bank, time, Math.Clamp(windowDays, 1, 3650), Math.Clamp(top, 1, 100)));
 
     [HttpGet("generator")]
+    [Authorize(Policy = Permissions.AnalysisUse)]
     public async Task<IActionResult> GenerateNumbers(
         string bank = "LT NACIONAL",
         string time = "21:00",
@@ -284,6 +297,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpPost("predictions/generate")]
+    [Authorize(Policy = Permissions.PredictionsWrite)]
     public async Task<IActionResult> GeneratePrediction(PredictionRequest request)
     {
         if (!IsNational(request.Bank)) return BadRequest(new { message = "Somente a banca LT NACIONAL é aceita." });
@@ -292,6 +306,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpGet("predictions/animal-trends")]
+    [Authorize(Policy = Permissions.AnalysisUse)]
     public async Task<IActionResult> AnimalTrends(string bank = "LT NACIONAL", string time = "21:00",
         DateOnly? targetDate = null, int windowDays = 90)
     {
@@ -302,6 +317,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpGet("predictions")]
+    [Authorize(Policy = Permissions.PredictionsRead)]
     public async Task<IActionResult> Predictions(string? bank = null, DateOnly? targetDate = null,
         string? time = null, string? status = null, int page = 1, int pageSize = 20)
     {
@@ -313,6 +329,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpGet("predictions/{id:guid}")]
+    [Authorize(Policy = Permissions.PredictionsRead)]
     public async Task<IActionResult> Prediction(Guid id)
     {
         var result = await predictions.Detail(id);
@@ -320,6 +337,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpGet("predictions/statistics")]
+    [Authorize(Policy = Permissions.DashboardRead)]
     public async Task<IActionResult> PredictionStatistics(string? bank = null, DateOnly? startDate = null,
         DateOnly? endDate = null, string? time = null)
     {
@@ -329,6 +347,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpGet("predictions/window-backtest")]
+    [Authorize(Policy = Permissions.AnalysisUse)]
     public async Task<IActionResult> PredictionWindowBacktest(string bank = "LT NACIONAL", DateOnly? date = null,
         int quantity = 28, string windows = "30,60,90,120,180,240", bool useSameDayResults = false)
     {
@@ -340,6 +359,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpPost("predictions/{id:guid}/evaluate")]
+    [Authorize(Policy = Permissions.PredictionsWrite)]
     public async Task<IActionResult> EvaluatePrediction(Guid id)
     {
         var result = await predictions.Evaluate(id);
@@ -347,6 +367,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpDelete("predictions/{id:guid}")]
+    [Authorize(Policy = Permissions.PredictionsWrite)]
     public async Task<IActionResult> DeletePrediction(Guid id)
     {
         var count = await predictions.Delete([id]);
@@ -354,6 +375,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpPost("predictions/delete-batch")]
+    [Authorize(Policy = Permissions.PredictionsWrite)]
     public async Task<IActionResult> DeletePredictions(PredictionDeleteRequest request)
     {
         if (request.Ids.Count == 0) return BadRequest(new { message = "Selecione ao menos uma previsão." });
@@ -362,10 +384,12 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     }
 
     [HttpGet("backtest")]
+    [Authorize(Policy = Permissions.AnalysisUse)]
     public async Task<IActionResult> Backtest(string bank = "LT NACIONAL", string time = "21:00", int windowDays = 15, int top = 8) =>
         Ok(await analysis.Backtest(bank, time, Math.Clamp(windowDays, 1, 3650), Math.Clamp(top, 1, 100)));
 
     [HttpPost("ai/analyze")]
+    [Authorize(Policy = Permissions.AnalysisUse)]
     public async Task<IActionResult> Ai(AiRequest request)
     {
         var windowDays = Math.Clamp(request.WindowDays, 1, 3650);
