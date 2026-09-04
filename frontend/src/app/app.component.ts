@@ -48,6 +48,7 @@ export class AppComponent implements OnInit {
     historyTotalPages = 1;
     bank = 'LT NACIONAL';
     time = '21:00';
+    analysisTime = '21:00';
     windowDays = 15;
     generationDate = this.localDate();
     generationQuantity = 10;
@@ -314,6 +315,7 @@ export class AppComponent implements OnInit {
         }
         this.generationDate = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
         this.time = next;
+        this.applyRecommendedWindow();
     }
 
     private schedulesFor() {
@@ -448,8 +450,8 @@ export class AppComponent implements OnInit {
     }
 
     analyze() {
-        this.http.get(this.api + `/forecast?bank=${encodeURIComponent(this.bank)}&time=${this.time}&windowDays=${this.windowDays}&top=10`).subscribe(x => this.forecast = x);
-        this.http.get(this.api + `/backtest?bank=${encodeURIComponent(this.bank)}&time=${this.time}&windowDays=${this.windowDays}&top=10`).subscribe(x => this.backtest = x);
+        this.http.get(this.api + `/forecast?bank=${encodeURIComponent(this.bank)}&time=${this.analysisTime}&windowDays=${this.windowDays}&top=10`).subscribe(x => this.forecast = x);
+        this.http.get(this.api + `/backtest?bank=${encodeURIComponent(this.bank)}&time=${this.analysisTime}&windowDays=${this.windowDays}&top=10`).subscribe(x => this.backtest = x);
     }
 
     generateNumbers() {
@@ -461,7 +463,7 @@ export class AppComponent implements OnInit {
             dezenaPayout: this.dezenaPayout, centenaPayout: this.centenaPayout, milharPayout: this.milharPayout,
             groups: Array.from(this.selectedAnimalGroups) };
         this.http.post<GenerationResponse>(this.api + '/predictions/generate', payload).subscribe({
-            next: response => { this.generation = response; this.generating = false; },
+            next: response => { this.generation = response; this.generationWindowDays = response.windowDays; this.generating = false; },
             error: error => { this.error = this.errorMessage(error); this.generating = false; }
         });
     }
@@ -482,11 +484,17 @@ export class AppComponent implements OnInit {
 
     clearAnimalGroups() { this.selectedAnimalGroups.clear(); }
 
+    onGenerationTimeChange(value: string) {
+        this.time = value;
+        this.applyRecommendedWindow();
+    }
+
     applyRecommendedWindow() {
         if (!this.useRecommendedWindow) return;
         const windows: Record<string, number> = { '02:00': 120, '08:00': 180, '10:00': 240, '12:00': 240,
             '15:00': 240, '17:00': 30, '21:00': 240, '23:00': 60 };
-        this.generationWindowDays = windows[this.time] || 180;
+        const normalizedTime = String(this.time || '').slice(0, 5);
+        this.generationWindowDays = windows[normalizedTime] || 180;
     }
 
     recalculatePayouts() {
@@ -719,7 +727,7 @@ export class AppComponent implements OnInit {
 
     ask() {
         this.ai = 'Analisando...';
-        this.http.post<any>(this.api + '/ai/analyze', { bank: this.bank, time: this.time, windowDays: this.windowDays, question: 'Compare continuidade, atraso, reversão e o ranking híbrido com base nos dados disponíveis.' }).subscribe(x => this.ai = x.answer);
+        this.http.post<any>(this.api + '/ai/analyze', { bank: this.bank, time: this.analysisTime, windowDays: this.windowDays, question: 'Compare continuidade, atraso, reversão e o ranking híbrido com base nos dados disponíveis.' }).subscribe(x => this.ai = x.answer);
     }
 
     private errorMessage(error: HttpErrorResponse): string {
