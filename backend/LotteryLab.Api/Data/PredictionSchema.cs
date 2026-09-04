@@ -37,6 +37,10 @@ public sealed class PredictionSchema(Db db)
             sample_results integer not null,
             robustness varchar(30) not null,
             config jsonb not null,
+            bet_amount numeric(12,2) not null default 30,
+            dezena_payout numeric(12,2) not null default 8.57,
+            centena_payout numeric(12,2) not null default 57.14,
+            milhar_payout numeric(12,2) not null default 296.30,
             status varchar(30) not null default 'PENDING',
             generated_at timestamptz not null default now()
         );
@@ -67,6 +71,8 @@ public sealed class PredictionSchema(Db db)
             milhar_hit_count integer not null default 0,
             centena_hit_count integer not null default 0,
             dezena_hit_count integer not null default 0,
+            return_amount numeric(12,2) not null default 0,
+            profit_amount numeric(12,2) not null default 0,
             best_milhar_position integer,
             best_centena_position integer,
             best_dezena_position integer,
@@ -80,6 +86,12 @@ public sealed class PredictionSchema(Db db)
         alter table prediction_evaluations add column if not exists milhar_hit_count integer not null default 0;
         alter table prediction_evaluations add column if not exists centena_hit_count integer not null default 0;
         alter table prediction_evaluations add column if not exists dezena_hit_count integer not null default 0;
+        alter table predictions add column if not exists bet_amount numeric(12,2) not null default 30;
+        alter table predictions add column if not exists dezena_payout numeric(12,2) not null default 8.57;
+        alter table predictions add column if not exists centena_payout numeric(12,2) not null default 57.14;
+        alter table predictions add column if not exists milhar_payout numeric(12,2) not null default 296.30;
+        alter table prediction_evaluations add column if not exists return_amount numeric(12,2) not null default 0;
+        alter table prediction_evaluations add column if not exists profit_amount numeric(12,2) not null default 0;
 
         create table if not exists data_migrations (
             code varchar(120) primary key,
@@ -103,5 +115,14 @@ public sealed class PredictionSchema(Db db)
             '{"exploitation":0.60,"emerging":0.20,"exploration":0.20,"maxPerDezena":1,"maxPerCentena":1,"maxPerGroup":2}'::jsonb,
             true
         ) on conflict(code, version) do nothing;
+
+        insert into algorithm_versions(code, version, name, weights, config, is_production)
+        values(
+            'HYBRID_EXPLORATION', 3, 'Motor híbrido com janela por horário e reforço de centena',
+            '{"frequency":0.22,"timeFrequency":0.12,"delay":0.08,"continuity":0.12,"transition":0.12,"momentum":0.10,"reversal":0.05,"digits":0.09,"novelty":0.10}'::jsonb,
+            '{"suffixWeights":{"milhar":0.10,"centena":0.45,"dezena":0.45},"recommendedWindows":{"02:00":120,"08:00":180,"10:00":240,"12:00":240,"15:00":240,"17:00":30,"21:00":240,"23:00":60}}'::jsonb,
+            true
+        ) on conflict(code, version) do nothing;
+        update algorithm_versions set is_production = (version = 3) where code = 'HYBRID_EXPLORATION';
         """;
 }

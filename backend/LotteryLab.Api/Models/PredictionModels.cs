@@ -1,7 +1,9 @@
 namespace LotteryLab.Api.Models;
 
 public record PredictionRequest(string Bank, string Time, DateOnly? TargetDate = null, int WindowDays = 90,
-    int Quantity = 10, List<int>? Groups = null);
+    int Quantity = 10, List<int>? Groups = null, bool UseRecommendedWindow = true,
+    decimal BetAmount = 30m, decimal DezenaPayout = 8.57m, decimal CentenaPayout = 57.14m,
+    decimal MilharPayout = 296.30m);
 public record PredictionDeleteRequest(List<Guid> Ids);
 
 public record PredictionFeatures(
@@ -18,7 +20,9 @@ public record PredictionResponse(
     Guid Id, string Algorithm, int AlgorithmVersion, string Bank, string Time,
     DateOnly TargetDate, int WindowDays, int Quantity, long RandomSeed,
     int SampleExtractions, int SampleResults, string Robustness,
-    object Composition, List<PredictionCandidate> Numbers, string Warning);
+    object Composition, List<PredictionCandidate> Numbers, string Warning,
+    decimal BetAmount, decimal DezenaPayout, decimal CentenaPayout, decimal MilharPayout,
+    bool UsedRecommendedWindow);
 
 public record PredictionEvaluation(
     Guid PredictionId, long ExtractionId, bool HitMilhar, bool HitCentena, bool HitDezena,

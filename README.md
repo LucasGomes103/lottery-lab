@@ -66,6 +66,17 @@ Em uma instalação nova, execute `database/schema.sql` uma vez. As tabelas do m
 
 Os scores são rankings relativos, não probabilidades calibradas. Em sorteios independentes não existe fórmula que garanta vantagem; qualquer alegação de melhoria depende de desempenho consistente fora da amostra.
 
+## Motor de previsões V3 e resultado financeiro
+- A janela automática usa o melhor período observado no backtest por horário: 02h/120 dias, 08h/180,
+  10h/240, 12h/240, 15h/240, 17h/30, 21h/240 e 23h/60. Ela pode ser desativada para testes manuais.
+- O ranking equilibra mais centena e dezena dentro dos sinais de frequência (45% para cada sufixo e 10% para milhar).
+- Cada previsão guarda o custo total e as cotações usadas. O padrão é R$ 30,00, com retornos de R$ 8,57 por
+  dezena, R$ 57,14 por centena e R$ 296,30 por milhar.
+- O dashboard apresenta valor apostado, retorno, saldo e ROI, consolidados e separados por horário e data.
+
+O retorno financeiro é uma simulação baseada nos valores configurados na previsão; confira sempre as regras e
+cotações efetivamente aplicadas antes de apostar.
+
 ## Hospedagem recomendada
 ### Banco: Neon
 1. Crie um projeto gratuito no Neon.

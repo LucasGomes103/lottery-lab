@@ -11,7 +11,7 @@ interface HistoryItem { id: number; bank: string; extraction_date: string; extra
 interface HistoryResponse { items: HistoryItem[]; total: number; page: number; pageSize: number; totalPages: number; }
 interface ImportQueueItem { id: number; file?: File; fileName: string; status: 'waiting' | 'processing' | 'ready' | 'imported' | 'error'; preview?: ImportPreview; error?: string; }
 interface GeneratedNumber { rank: number; milhar: string; centena: string; dezena: string; group: number; selectionType: string; statisticalScore: number; finalScore: number; features: any; reasons: string[]; }
-interface GenerationResponse { id: string; algorithm: string; algorithmVersion: number; bank: string; time: string; targetDate: string; windowDays: number; quantity: number; randomSeed: number; sampleExtractions: number; sampleResults: number; robustness: string; composition: any; numbers: GeneratedNumber[]; warning: string; }
+interface GenerationResponse { id: string; algorithm: string; algorithmVersion: number; bank: string; time: string; targetDate: string; windowDays: number; quantity: number; randomSeed: number; sampleExtractions: number; sampleResults: number; robustness: string; composition: any; numbers: GeneratedNumber[]; warning: string; betAmount: number; dezenaPayout: number; centenaPayout: number; milharPayout: number; usedRecommendedWindow: boolean; }
 
 @Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule], templateUrl: './app.component.html' })
 export class AppComponent implements OnInit {
@@ -51,7 +51,12 @@ export class AppComponent implements OnInit {
     windowDays = 15;
     generationDate = this.localDate();
     generationQuantity = 10;
-    generationWindowDays = 90;
+    generationWindowDays = 240;
+    useRecommendedWindow = true;
+    betAmount = 30;
+    dezenaPayout = 8.57;
+    centenaPayout = 57.14;
+    milharPayout = 296.30;
     generation: GenerationResponse | null = null;
     animalTrends: any = null;
     loadingAnimalTrends = false;
@@ -452,6 +457,8 @@ export class AppComponent implements OnInit {
         this.error = '';
         const payload = { bank: this.bank, time: this.time, targetDate: this.generationDate,
             windowDays: this.generationWindowDays, quantity: this.generationQuantity,
+            useRecommendedWindow: this.useRecommendedWindow, betAmount: this.betAmount,
+            dezenaPayout: this.dezenaPayout, centenaPayout: this.centenaPayout, milharPayout: this.milharPayout,
             groups: Array.from(this.selectedAnimalGroups) };
         this.http.post<GenerationResponse>(this.api + '/predictions/generate', payload).subscribe({
             next: response => { this.generation = response; this.generating = false; },
@@ -474,6 +481,17 @@ export class AppComponent implements OnInit {
     }
 
     clearAnimalGroups() { this.selectedAnimalGroups.clear(); }
+
+    applyRecommendedWindow() {
+        if (!this.useRecommendedWindow) return;
+        const windows: Record<string, number> = { '02:00': 120, '08:00': 180, '10:00': 240, '12:00': 240,
+            '15:00': 240, '17:00': 30, '21:00': 240, '23:00': 60 };
+        this.generationWindowDays = windows[this.time] || 180;
+    }
+
+    money(value: number | null | undefined) {
+        return (Number(value) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
 
     loadPredictionHistory(page = 1) {
         this.predictionPage = Math.max(1, page);

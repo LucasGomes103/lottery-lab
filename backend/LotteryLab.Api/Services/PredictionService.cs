@@ -10,7 +10,7 @@ namespace LotteryLab.Api.Services;
 public sealed class PredictionService(Db db)
 {
     private const string Algorithm = "HYBRID_EXPLORATION";
-    private const int Version = 2;
+    private const int Version = 3;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] Animals = ["AVESTRUZ", "AGUIA", "BURRO", "BORBOLETA", "CACHORRO", "CABRA",
         "CARNEIRO", "CAMELO", "COBRA", "COELHO", "CAVALO", "ELEFANTE", "GALO", "GATO", "JACARE", "LEAO",
@@ -23,16 +23,24 @@ public sealed class PredictionService(Db db)
         string SelectionType, double StatisticalScore, double FinalScore, string FeaturesJson, string ReasonsJson);
     private sealed record EvaluationRow(long ExtractionId, bool HitMilhar, bool HitCentena, bool HitDezena,
         int MilharHitCount, int CentenaHitCount, int DezenaHitCount,
-        int? BestMilharPosition, int? BestCentenaPosition, int? BestDezenaPosition, DateTime EvaluatedAt);
+        int? BestMilharPosition, int? BestCentenaPosition, int? BestDezenaPosition, DateTime EvaluatedAt,
+        decimal ReturnAmount, decimal ProfitAmount);
     private sealed record PredictionTarget(string Bank, DateTime TargetDate, TimeSpan TargetTime);
+    private sealed record PredictionFinancial(decimal BetAmount, decimal DezenaPayout,
+        decimal CentenaPayout, decimal MilharPayout);
 
     public async Task<PredictionResponse> GenerateAndSave(PredictionRequest request)
     {
         var bank = request.Bank.Trim();
         var date = request.TargetDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
         if (!TimeOnly.TryParse(request.Time, out var targetTime)) throw new ArgumentException("Horário inválido.");
-        var windowDays = Math.Clamp(request.WindowDays, 7, 3650);
+        var requestedWindowDays = Math.Clamp(request.WindowDays, 7, 3650);
+        var windowDays = request.UseRecommendedWindow ? RecommendedWindow(targetTime) : requestedWindowDays;
         var quantity = Math.Clamp(request.Quantity, 1, 100);
+        var betAmount = Math.Clamp(request.BetAmount, 0m, 1_000_000m);
+        var dezenaPayout = Math.Clamp(request.DezenaPayout, 0m, 1_000_000m);
+        var centenaPayout = Math.Clamp(request.CentenaPayout, 0m, 1_000_000m);
+        var milharPayout = Math.Clamp(request.MilharPayout, 0m, 1_000_000m);
         var requestedGroups = (request.Groups ?? []).Where(x => x is >= 1 and <= 25).Distinct().Order().ToArray();
         var groupKey = requestedGroups.Length == 0 ? "ALL" : string.Join('-', requestedGroups);
         var seed = StableSeed($"{Algorithm}:{Version}:{bank}:{date:yyyy-MM-dd}:{targetTime:HH:mm}:{windowDays}:{quantity}:{groupKey}");
@@ -67,18 +75,22 @@ public sealed class PredictionService(Db db)
             emerging = selected.Count(x => x.SelectionType == "EMERGING"),
             exploration = selected.Count(x => x.SelectionType == "EXPLORATION"),
             deterministicSeed = seed,
-            restrictedGroups = requestedGroups
+            restrictedGroups = requestedGroups,
+            requestedWindowDays,
+            usedRecommendedWindow = request.UseRecommendedWindow
         };
 
         await using var transaction = await connection.BeginTransactionAsync();
         await connection.ExecuteAsync(
             @"insert into predictions(id,bank,target_date,target_time,algorithm_code,algorithm_version,
-                window_days,quantity,random_seed,sample_extractions,sample_results,robustness,config)
+                window_days,quantity,random_seed,sample_extractions,sample_results,robustness,config,
+                bet_amount,dezena_payout,centena_payout,milhar_payout)
               values(@id,@bank,@date,@time::time,@Algorithm,@Version,@windowDays,@quantity,@seed,
-                @sampleExtractions,@sampleResults,@robustness,@config::jsonb)",
+                @sampleExtractions,@sampleResults,@robustness,@config::jsonb,
+                @betAmount,@dezenaPayout,@centenaPayout,@milharPayout)",
             new { id, bank, date = target.Date, time = targetTime.ToString("HH:mm"), Algorithm, Version, windowDays,
                 quantity, seed, sampleExtractions, sampleResults = rows.Count, robustness,
-                config = JsonSerializer.Serialize(composition, JsonOptions) }, transaction);
+                config = JsonSerializer.Serialize(composition, JsonOptions), betAmount, dezenaPayout, centenaPayout, milharPayout }, transaction);
         foreach (var candidate in selected)
             await connection.ExecuteAsync(
                 @"insert into prediction_candidates(prediction_id,rank,milhar,centena,dezena,group_no,
@@ -94,7 +106,8 @@ public sealed class PredictionService(Db db)
 
         return new PredictionResponse(id, Algorithm, Version, bank, targetTime.ToString("HH:mm"), date,
             windowDays, quantity, seed, sampleExtractions, rows.Count, robustness, composition, selected,
-            "Os scores são rankings estatísticos, não probabilidades nem garantia de acerto. A vantagem deve ser confirmada por backtest fora da amostra.");
+            "Os scores são rankings estatísticos, não probabilidades nem garantia de acerto. A vantagem deve ser confirmada por backtest fora da amostra.",
+            betAmount, dezenaPayout, centenaPayout, milharPayout, request.UseRecommendedWindow);
     }
 
     public async Task<AnimalTrendResponse> AnimalTrends(string bank, string time, DateOnly targetDate, int windowDays)
@@ -151,9 +164,9 @@ public sealed class PredictionService(Db db)
         args.Add("pageSize", pageSize);
         var total = await connection.ExecuteScalarAsync<long>($"select count(*) from predictions p {filter}", args);
         var items = await connection.QueryAsync($@"select p.id,p.bank,p.target_date,p.target_time,p.algorithm_code,
-            p.algorithm_version,p.quantity,p.robustness,p.status,p.generated_at,
+            p.algorithm_version,p.window_days,p.quantity,p.robustness,p.status,p.generated_at,p.bet_amount,
             pe.hit_milhar,pe.hit_centena,pe.hit_dezena,
-            pe.milhar_hit_count,pe.centena_hit_count,pe.dezena_hit_count
+            pe.milhar_hit_count,pe.centena_hit_count,pe.dezena_hit_count,pe.return_amount,pe.profit_amount
             from predictions p left join prediction_evaluations pe on pe.prediction_id=p.id {filter}
             order by p.generated_at desc offset @offset limit @pageSize", args);
         return new { items, total, page, pageSize, totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize)) };
@@ -179,7 +192,7 @@ public sealed class PredictionService(Db db)
                      centena_hit_count as CentenaHitCount,dezena_hit_count as DezenaHitCount,
                      best_milhar_position as BestMilharPosition,
                      best_centena_position as BestCentenaPosition,best_dezena_position as BestDezenaPosition,
-                     evaluated_at as EvaluatedAt
+                     evaluated_at as EvaluatedAt,return_amount as ReturnAmount,profit_amount as ProfitAmount
               from prediction_evaluations where prediction_id=@id", new { id });
         var actual = evaluation is null ? [] : (await connection.QueryAsync<(int Position, string Number)>(
             "select position,number from results where extraction_id=@id and position between 1 and 5 order by position",
@@ -293,7 +306,12 @@ public sealed class PredictionService(Db db)
                    coalesce(sum(pe.milhar_hit_count),0)::int as milhar_hits,
                    coalesce(sum(pe.centena_hit_count),0)::int as centena_hits,
                    coalesce(sum(pe.dezena_hit_count),0)::int as dezena_hits,
-                   coalesce(sum(p.quantity) filter(where pe.prediction_id is not null),0)::int as evaluated_candidates
+                   coalesce(sum(p.quantity) filter(where pe.prediction_id is not null),0)::int as evaluated_candidates,
+                   coalesce(sum(p.bet_amount) filter(where pe.prediction_id is not null),0)::numeric as bet_amount,
+                   coalesce(sum(pe.return_amount),0)::numeric as return_amount,
+                   coalesce(sum(pe.profit_amount),0)::numeric as profit_amount,
+                   case when coalesce(sum(p.bet_amount) filter(where pe.prediction_id is not null),0)=0 then 0
+                     else round(100*sum(pe.profit_amount)/sum(p.bet_amount) filter(where pe.prediction_id is not null),2) end as roi_percent
             from predictions p left join prediction_evaluations pe on pe.prediction_id=p.id {filter}", args);
         var byTime = await connection.QueryAsync($@"
             select p.target_time, count(*)::int as evaluated_predictions,
@@ -302,14 +320,20 @@ public sealed class PredictionService(Db db)
                    count(*) filter(where pe.hit_dezena)::int as predictions_with_dezena_hit,
                    coalesce(sum(pe.milhar_hit_count),0)::int as milhar_hits,
                    coalesce(sum(pe.centena_hit_count),0)::int as centena_hits,
-                   coalesce(sum(pe.dezena_hit_count),0)::int as dezena_hits
+                   coalesce(sum(pe.dezena_hit_count),0)::int as dezena_hits,
+                   coalesce(sum(p.bet_amount),0)::numeric as bet_amount,
+                   coalesce(sum(pe.return_amount),0)::numeric as return_amount,
+                   coalesce(sum(pe.profit_amount),0)::numeric as profit_amount
             from predictions p join prediction_evaluations pe on pe.prediction_id=p.id {evaluatedFilter}
             group by p.target_time order by p.target_time", args);
         var byDate = await connection.QueryAsync($@"
             select p.target_date, count(*)::int as evaluated_predictions,
                    coalesce(sum(pe.milhar_hit_count),0)::int as milhar_hits,
                    coalesce(sum(pe.centena_hit_count),0)::int as centena_hits,
-                   coalesce(sum(pe.dezena_hit_count),0)::int as dezena_hits
+                   coalesce(sum(pe.dezena_hit_count),0)::int as dezena_hits,
+                   coalesce(sum(p.bet_amount),0)::numeric as bet_amount,
+                   coalesce(sum(pe.return_amount),0)::numeric as return_amount,
+                   coalesce(sum(pe.profit_amount),0)::numeric as profit_amount
             from predictions p join prediction_evaluations pe on pe.prediction_id=p.id {evaluatedFilter}
             group by p.target_date order by p.target_date desc limit 30", args);
         return new { totals, byTime, byDate };
@@ -329,6 +353,10 @@ public sealed class PredictionService(Db db)
             new { bank, date = date.ToDateTime(TimeOnly.MinValue), time });
         foreach (var predictionId in predictions)
         {
+            var financial = await connection.QuerySingleAsync<PredictionFinancial>(
+                @"select bet_amount as BetAmount,dezena_payout as DezenaPayout,
+                         centena_payout as CentenaPayout,milhar_payout as MilharPayout
+                  from predictions where id=@predictionId", new { predictionId });
             var candidates = (await connection.QueryAsync<(string Milhar, string Centena, string Dezena)>(
                 "select milhar,centena,dezena from prediction_candidates where prediction_id=@predictionId", new { predictionId })).ToList();
             int? milharPos = actual.Where(a => candidates.Any(c => c.Milhar == a.Number)).Select(a => (int?)a.Position).Min();
@@ -337,26 +365,41 @@ public sealed class PredictionService(Db db)
             var milharHitCount = candidates.Sum(c => actual.Count(a => c.Milhar == a.Number));
             var centenaHitCount = candidates.Sum(c => actual.Count(a => c.Centena == a.Number[^3..]));
             var dezenaHitCount = candidates.Sum(c => actual.Count(a => c.Dezena == a.Number[^2..]));
+            var returnAmount = Math.Round(milharHitCount * financial.MilharPayout +
+                centenaHitCount * financial.CentenaPayout + dezenaHitCount * financial.DezenaPayout, 2);
+            var profitAmount = returnAmount - financial.BetAmount;
             var details = JsonSerializer.Serialize(new { actual = actual.Select(x => x.Number) }, JsonOptions);
             await connection.ExecuteAsync(
                 @"insert into prediction_evaluations(prediction_id,extraction_id,hit_milhar,hit_centena,hit_dezena,
                     milhar_hit_count,centena_hit_count,dezena_hit_count,
-                    best_milhar_position,best_centena_position,best_dezena_position,details)
+                    best_milhar_position,best_centena_position,best_dezena_position,return_amount,profit_amount,details)
                   values(@predictionId,@extraction,@hitMilhar,@hitCentena,@hitDezena,
-                    @milharHitCount,@centenaHitCount,@dezenaHitCount,@milharPos,@centenaPos,@dezenaPos,@details::jsonb)
+                    @milharHitCount,@centenaHitCount,@dezenaHitCount,@milharPos,@centenaPos,@dezenaPos,
+                    @returnAmount,@profitAmount,@details::jsonb)
                   on conflict(prediction_id) do update set
                     extraction_id=excluded.extraction_id,evaluated_at=now(),
                     hit_milhar=excluded.hit_milhar,hit_centena=excluded.hit_centena,hit_dezena=excluded.hit_dezena,
                     milhar_hit_count=excluded.milhar_hit_count,centena_hit_count=excluded.centena_hit_count,
                     dezena_hit_count=excluded.dezena_hit_count,
                     best_milhar_position=excluded.best_milhar_position,best_centena_position=excluded.best_centena_position,
-                    best_dezena_position=excluded.best_dezena_position,details=excluded.details;
+                    best_dezena_position=excluded.best_dezena_position,return_amount=excluded.return_amount,
+                    profit_amount=excluded.profit_amount,details=excluded.details;
                   update predictions set status='EVALUATED' where id=@predictionId",
                 new { predictionId, extraction, hitMilhar = milharPos is not null, hitCentena = centenaPos is not null,
                     hitDezena = dezenaPos is not null, milharHitCount, centenaHitCount, dezenaHitCount,
-                    milharPos, centenaPos, dezenaPos, details });
+                    milharPos, centenaPos, dezenaPos, returnAmount, profitAmount, details });
         }
     }
+
+    private static int RecommendedWindow(TimeOnly time) => time.Hour switch
+    {
+        2 => 120,
+        8 => 180,
+        10 or 12 or 15 or 21 => 240,
+        17 => 30,
+        23 => 60,
+        _ => 180
+    };
 
     public async Task<int> ReevaluateAll()
     {
@@ -459,8 +502,8 @@ public sealed class PredictionService(Db db)
         return Enumerable.Range(0, 10_000).Select(value =>
         {
             var m = value.ToString("0000"); var c = m[^3..]; var d = m[^2..];
-            var frequency = .15 * Norm(freqM, m) + .35 * Norm(freqC, c) + .50 * Norm(freqD, d);
-            var timeFrequency = .15 * Norm(timeM, m) + .35 * Norm(timeC, c) + .50 * Norm(timeD, d);
+            var frequency = .10 * Norm(freqM, m) + .45 * Norm(freqC, c) + .45 * Norm(freqD, d);
+            var timeFrequency = .10 * Norm(timeM, m) + .45 * Norm(timeC, c) + .45 * Norm(timeD, d);
             var continuity = Norm(recentD, d);
             var momentum = Math.Clamp(Norm(recentD, d) - Norm(longD, d), -1, 1);
             var transition = Norm(transitionD, d);

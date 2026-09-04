@@ -11,7 +11,10 @@ create table if not exists predictions (
   target_time time not null, algorithm_code varchar(80) not null, algorithm_version integer not null,
   window_days integer not null, quantity integer not null, random_seed bigint not null,
   sample_extractions integer not null, sample_results integer not null, robustness varchar(30) not null,
-  config jsonb not null, status varchar(30) not null default 'PENDING', generated_at timestamptz not null default now()
+  config jsonb not null, bet_amount numeric(12,2) not null default 30,
+  dezena_payout numeric(12,2) not null default 8.57, centena_payout numeric(12,2) not null default 57.14,
+  milhar_payout numeric(12,2) not null default 296.30,
+  status varchar(30) not null default 'PENDING', generated_at timestamptz not null default now()
 );
 create table if not exists prediction_candidates (
   id bigserial primary key, prediction_id uuid not null references predictions(id) on delete cascade,
@@ -25,7 +28,8 @@ create table if not exists prediction_evaluations (
   extraction_id bigint not null references extractions(id), evaluated_at timestamptz not null default now(),
   hit_milhar boolean not null, hit_centena boolean not null, hit_dezena boolean not null,
   milhar_hit_count integer not null default 0, centena_hit_count integer not null default 0,
-  dezena_hit_count integer not null default 0,
+  dezena_hit_count integer not null default 0, return_amount numeric(12,2) not null default 0,
+  profit_amount numeric(12,2) not null default 0,
   best_milhar_position integer, best_centena_position integer, best_dezena_position integer,
   details jsonb not null
 );
@@ -35,3 +39,9 @@ create index if not exists ix_prediction_candidates_suffixes on prediction_candi
 alter table prediction_evaluations add column if not exists milhar_hit_count integer not null default 0;
 alter table prediction_evaluations add column if not exists centena_hit_count integer not null default 0;
 alter table prediction_evaluations add column if not exists dezena_hit_count integer not null default 0;
+alter table predictions add column if not exists bet_amount numeric(12,2) not null default 30;
+alter table predictions add column if not exists dezena_payout numeric(12,2) not null default 8.57;
+alter table predictions add column if not exists centena_payout numeric(12,2) not null default 57.14;
+alter table predictions add column if not exists milhar_payout numeric(12,2) not null default 296.30;
+alter table prediction_evaluations add column if not exists return_amount numeric(12,2) not null default 0;
+alter table prediction_evaluations add column if not exists profit_amount numeric(12,2) not null default 0;
