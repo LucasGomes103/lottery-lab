@@ -489,6 +489,13 @@ export class AppComponent implements OnInit {
         this.generationWindowDays = windows[this.time] || 180;
     }
 
+    recalculatePayouts() {
+        const factor = Math.max(0, Number(this.betAmount) || 0) / 30;
+        this.dezenaPayout = Math.round(8.57 * factor * 100) / 100;
+        this.centenaPayout = Math.round(57.14 * factor * 100) / 100;
+        this.milharPayout = Math.round(296.30 * factor * 100) / 100;
+    }
+
     money(value: number | null | undefined) {
         return (Number(value) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     }
