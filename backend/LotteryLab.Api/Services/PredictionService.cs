@@ -574,11 +574,13 @@ public sealed class PredictionService(Db db)
         var recent = targetRows.TakeLast(5).SelectMany(x => x.Numbers).ToList();
         var longTerm = targetRows.TakeLast(30).SelectMany(x => x.Numbers).ToList();
         var all = extractions.SelectMany(x => x.Numbers).ToList();
-        var currentGroups = extractions.Where(x => x.Date == extractions.Max(e => e.Date) && x.Time < targetTime.ToTimeSpan())
-            .SelectMany(x => x.Numbers).Select(GroupOf).ToHashSet();
-        var transitionTargets = targetRows.Where(t =>
-            extractions.Where(e => e.Date == t.Date && e.Time < targetTime.ToTimeSpan())
-                .SelectMany(e => e.Numbers).Select(GroupOf).Any(currentGroups.Contains)).SelectMany(x => x.Numbers).ToList();
+        var targetTimeSpan = targetTime.ToTimeSpan();
+        var currentDate = extractions.Max(e => e.Date);
+        var priorGroupsByDate = extractions.GroupBy(e => e.Date).ToDictionary(group => group.Key,
+            group => group.Where(e => e.Time < targetTimeSpan).SelectMany(e => e.Numbers).Select(GroupOf).ToHashSet());
+        var currentGroups = priorGroupsByDate.GetValueOrDefault(currentDate, []);
+        var transitionTargets = targetRows.Where(t => priorGroupsByDate.GetValueOrDefault(t.Date, []).Overlaps(currentGroups))
+            .SelectMany(x => x.Numbers).ToList();
 
         var freqM = Counts(all, x => x); var freqC = Counts(all, x => x[^3..]); var freqD = Counts(all, x => x[^2..]);
         var timeM = Counts(longTerm, x => x); var timeC = Counts(longTerm, x => x[^3..]); var timeD = Counts(longTerm, x => x[^2..]);
