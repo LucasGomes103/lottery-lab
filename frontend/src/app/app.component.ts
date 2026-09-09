@@ -22,6 +22,8 @@ export class AppComponent implements OnInit {
     backtest: any = null;
     decisionBattery: any = null;
     loadingDecisionBattery = false;
+    decisionBatteryJob: any = null;
+    private decisionBatteryPoll: ReturnType<typeof setInterval> | null = null;
     ai = '';
     message = '';
     error = '';
@@ -458,14 +460,35 @@ export class AppComponent implements OnInit {
 
     runDecisionBattery() {
         this.loadingDecisionBattery = true;
+        this.decisionBattery = null;
+        this.decisionBatteryJob = null;
         this.error = '';
         const params = new URLSearchParams({ bank: this.bank, quantity: String(this.generationQuantity),
             betAmount: String(this.betAmount), dezenaPayout: String(this.dezenaPayout),
             centenaPayout: String(this.centenaPayout), milharPayout: String(this.milharPayout) });
-        this.http.get<any>(this.api + `/predictions/decision-battery?${params}`).subscribe({
-            next: response => { this.decisionBattery = response; this.loadingDecisionBattery = false; },
+        this.http.post<any>(this.api + `/predictions/decision-battery/jobs?${params}`, {}).subscribe({
+            next: job => { this.decisionBatteryJob = job; this.pollDecisionBattery(job.id); },
             error: error => { this.error = this.errorMessage(error); this.loadingDecisionBattery = false; }
         });
+    }
+
+    private pollDecisionBattery(id: string) {
+        if (this.decisionBatteryPoll) clearInterval(this.decisionBatteryPoll);
+        const poll = () => this.http.get<any>(this.api + `/predictions/decision-battery/jobs/${id}`).subscribe({
+            next: job => {
+                this.decisionBatteryJob = job;
+                if (job.status === 'COMPLETED') { this.decisionBattery = job.result; this.loadingDecisionBattery = false; this.stopDecisionBatteryPoll(); }
+                if (job.status === 'FAILED') { this.error = job.error || 'A bateria não foi concluída.'; this.loadingDecisionBattery = false; this.stopDecisionBatteryPoll(); }
+            },
+            error: error => { this.error = this.errorMessage(error); this.loadingDecisionBattery = false; this.stopDecisionBatteryPoll(); }
+        });
+        poll();
+        this.decisionBatteryPoll = setInterval(poll, 1500);
+    }
+
+    private stopDecisionBatteryPoll() {
+        if (this.decisionBatteryPoll) clearInterval(this.decisionBatteryPoll);
+        this.decisionBatteryPoll = null;
     }
 
     generateNumbers() {

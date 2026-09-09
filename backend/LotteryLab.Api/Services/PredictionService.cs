@@ -477,7 +477,8 @@ public sealed class PredictionService(Db db)
     // This is deliberately an evaluation tool, not a number generator: every trial is made
     // before the result being checked and the final fifth is kept as an untouched test set.
     public async Task<object> DecisionBattery(string bank, int quantity, decimal betAmount,
-        decimal dezenaPayout, decimal centenaPayout, decimal milharPayout, int maxEvaluations = 1000)
+        decimal dezenaPayout, decimal centenaPayout, decimal milharPayout, int maxEvaluations = 500,
+        Action<int, int>? reportProgress = null)
     {
         quantity = Math.Clamp(quantity, 1, 100);
         maxEvaluations = Math.Clamp(maxEvaluations, 100, 3000);
@@ -496,6 +497,7 @@ public sealed class PredictionService(Db db)
         if (firstTestable < 0) return new { bank, decision = "BASE INSUFICIENTE", message = "São necessárias ao menos 30 extrações anteriores para iniciar a bateria.", availableExtractions = extractions.Count };
 
         var start = Math.Max(firstTestable, extractions.Count - maxEvaluations);
+        var planned = extractions.Count - start;
         var trials = new List<(string Model, decimal Net, decimal Return, int M, int C, int D)>();
         for (var i = start; i < extractions.Count; i++)
         {
@@ -513,6 +515,7 @@ public sealed class PredictionService(Db db)
             }
             var random = new Random(unchecked((int)StableSeed($"battery:random:{bank}:{target.Date:yyyy-MM-dd}:{target.Time}:{quantity}")));
             AddTrial("ALEATÓRIO", Enumerable.Range(0, 10_000).OrderBy(_ => random.Next()).Take(quantity).Select(x => x.ToString("0000")).ToList(), target.Numbers);
+            reportProgress?.Invoke(i - start + 1, planned);
         }
 
         void AddTrial(string model, List<string> picks, List<string> actual)

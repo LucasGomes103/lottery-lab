@@ -12,7 +12,8 @@ namespace LotteryLab.Api.Controllers;
 [Route("api")]
 [Authorize]
 public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService analysis, AiService ai,
-    NumberGeneratorService generator, PredictionService predictions, ExternalResultsService externalResults) : ControllerBase
+    NumberGeneratorService generator, PredictionService predictions, DecisionBatteryJobService decisionBatteryJobs,
+    ExternalResultsService externalResults) : ControllerBase
 {
     [HttpPost("imports/preview")]
     [Authorize(Policy = Permissions.ImportsWrite)]
@@ -362,12 +363,32 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     [Authorize(Policy = Permissions.AnalysisUse)]
     public async Task<IActionResult> PredictionDecisionBattery(string bank = "LT NACIONAL", int quantity = 8,
         decimal betAmount = 30m, decimal dezenaPayout = 8.57m, decimal centenaPayout = 57.14m,
-        decimal milharPayout = 296.30m, int maxEvaluations = 1000)
+        decimal milharPayout = 296.30m, int maxEvaluations = 500)
     {
         if (!IsNational(bank)) return BadRequest(new { message = "Somente a banca LT NACIONAL é aceita." });
         return Ok(await predictions.DecisionBattery(bank.Trim(), quantity, Math.Clamp(betAmount, 0m, 1_000_000m),
             Math.Clamp(dezenaPayout, 0m, 1_000_000m), Math.Clamp(centenaPayout, 0m, 1_000_000m),
             Math.Clamp(milharPayout, 0m, 1_000_000m), maxEvaluations));
+    }
+
+    [HttpPost("predictions/decision-battery/jobs")]
+    [Authorize(Policy = Permissions.AnalysisUse)]
+    public IActionResult StartPredictionDecisionBattery(string bank = "LT NACIONAL", int quantity = 8,
+        decimal betAmount = 30m, decimal dezenaPayout = 8.57m, decimal centenaPayout = 57.14m,
+        decimal milharPayout = 296.30m, int maxEvaluations = 500)
+    {
+        if (!IsNational(bank)) return BadRequest(new { message = "Somente a banca LT NACIONAL é aceita." });
+        return Accepted(decisionBatteryJobs.Start(bank.Trim(), Math.Clamp(quantity, 1, 100), Math.Clamp(betAmount, 0m, 1_000_000m),
+            Math.Clamp(dezenaPayout, 0m, 1_000_000m), Math.Clamp(centenaPayout, 0m, 1_000_000m),
+            Math.Clamp(milharPayout, 0m, 1_000_000m), maxEvaluations));
+    }
+
+    [HttpGet("predictions/decision-battery/jobs/{id:guid}")]
+    [Authorize(Policy = Permissions.AnalysisUse)]
+    public IActionResult PredictionDecisionBatteryJob(Guid id)
+    {
+        var job = decisionBatteryJobs.Get(id);
+        return job is null ? NotFound(new { message = "Execução não encontrada. A aplicação pode ter sido reiniciada." }) : Ok(job);
     }
 
     [HttpPost("predictions/{id:guid}/evaluate")]
