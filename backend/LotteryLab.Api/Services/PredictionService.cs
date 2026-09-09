@@ -474,7 +474,95 @@ public sealed class PredictionService(Db db)
         return new { bank, date, quantity, prizeRange = "1-5", useSameDayResults, comparisons };
     }
 
-    private static List<Scored> Score(List<Row> rows, TimeOnly targetTime, Dictionary<string, int> priorAppearances)
+    // This is deliberately an evaluation tool, not a number generator: every trial is made
+    // before the result being checked and the final fifth is kept as an untouched test set.
+    public async Task<object> DecisionBattery(string bank, int quantity, decimal betAmount,
+        decimal dezenaPayout, decimal centenaPayout, decimal milharPayout, int maxEvaluations = 1000)
+    {
+        quantity = Math.Clamp(quantity, 1, 100);
+        maxEvaluations = Math.Clamp(maxEvaluations, 100, 3000);
+        await using var connection = db.Open();
+        var rows = (await connection.QueryAsync<Row>(@"select e.id as ExtractionId,e.extraction_date as Date,
+                    e.extraction_time as Time,r.position as Position,r.number as Number
+              from results r join extractions e on e.id=r.extraction_id
+              where e.bank=@bank and r.position between 1 and 5
+              order by e.extraction_date,e.extraction_time,r.position", new { bank })).ToList();
+        var extractions = rows.GroupBy(x => x.ExtractionId).Select(g => new
+        {
+            Id = g.Key, Date = g.First().Date.Date, Time = g.First().Time,
+            Numbers = g.OrderBy(x => x.Position).Select(x => x.Number.PadLeft(4, '0')[^4..]).ToList()
+        }).OrderBy(x => x.Date).ThenBy(x => x.Time).ToList();
+        var firstTestable = extractions.FindIndex(x => extractions.Count(y => y.Date < x.Date || (y.Date == x.Date && y.Time < x.Time)) >= 30);
+        if (firstTestable < 0) return new { bank, decision = "BASE INSUFICIENTE", message = "São necessárias ao menos 30 extrações anteriores para iniciar a bateria.", availableExtractions = extractions.Count };
+
+        var start = Math.Max(firstTestable, extractions.Count - maxEvaluations);
+        var trials = new List<(string Model, decimal Net, decimal Return, int M, int C, int D)>();
+        for (var i = start; i < extractions.Count; i++)
+        {
+            var target = extractions[i];
+            var timestamp = target.Date.Add(target.Time);
+            foreach (var model in new[] { "V2", "V3" })
+            {
+                var window = model == "V3" ? RecommendedWindow(TimeOnly.FromTimeSpan(target.Time)) : 90;
+                var history = rows.Where(x => x.Date.Add(x.Time) < timestamp && x.Date >= target.Date.AddDays(-window)).ToList();
+                if (history.Count == 0) continue;
+                var ranked = Score(history, TimeOnly.FromTimeSpan(target.Time), [], model == "V3");
+                var seed = StableSeed($"battery:{model}:{bank}:{target.Date:yyyy-MM-dd}:{target.Time}:{window}:{quantity}");
+                var picks = Select(ranked, quantity, seed, false).Select(x => x.Milhar).ToList();
+                AddTrial(model, picks, target.Numbers);
+            }
+            var random = new Random(unchecked((int)StableSeed($"battery:random:{bank}:{target.Date:yyyy-MM-dd}:{target.Time}:{quantity}")));
+            AddTrial("ALEATÓRIO", Enumerable.Range(0, 10_000).OrderBy(_ => random.Next()).Take(quantity).Select(x => x.ToString("0000")).ToList(), target.Numbers);
+        }
+
+        void AddTrial(string model, List<string> picks, List<string> actual)
+        {
+            var m = picks.Sum(p => actual.Count(a => a == p));
+            var c = picks.Sum(p => actual.Count(a => a.EndsWith(p[^3..])));
+            var d = picks.Sum(p => actual.Count(a => a.EndsWith(p[^2..])));
+            var returned = d * dezenaPayout + c * centenaPayout + m * milharPayout;
+            trials.Add((model, returned - betAmount, returned, m, c, d));
+        }
+
+        var modelRows = new List<object>();
+        foreach (var model in new[] { "V2", "V3", "ALEATÓRIO" })
+        {
+            var all = trials.Where(x => x.Model == model).ToList();
+            var test = all.Skip((int)Math.Floor(all.Count * .8)).ToList();
+            var randomTest = trials.Where(x => x.Model == "ALEATÓRIO").Skip((int)Math.Floor(all.Count * .8)).ToList();
+            var differences = test.Zip(randomTest, (a, b) => (double)(a.Net - b.Net)).ToList();
+            var mean = differences.DefaultIfEmpty().Average();
+            var sd = differences.Count < 2 ? 0 : Math.Sqrt(differences.Sum(x => Math.Pow(x - mean, 2)) / (differences.Count - 1));
+            var margin = differences.Count < 2 ? 0 : 1.96 * sd / Math.Sqrt(differences.Count);
+            decimal Cost(IEnumerable<(string Model, decimal Net, decimal Return, int M, int C, int D)> data) => data.Count() * betAmount;
+            modelRows.Add(new {
+                model, trials = all.Count, testTrials = test.Count,
+                milharHits = all.Sum(x => x.M), centenaHits = all.Sum(x => x.C), dezenaHits = all.Sum(x => x.D),
+                totalBet = Cost(all), totalReturn = all.Sum(x => x.Return), net = all.Sum(x => x.Net),
+                roiPercent = Cost(all) == 0 ? 0 : Math.Round(100 * all.Sum(x => x.Net) / Cost(all), 2),
+                testNet = test.Sum(x => x.Net),
+                testRoiPercent = Cost(test) == 0 ? 0 : Math.Round(100 * test.Sum(x => x.Net) / Cost(test), 2),
+                deltaVsRandomPerTrial = Math.Round(mean, 2), confidence95Low = Math.Round(mean - margin, 2), confidence95High = Math.Round(mean + margin, 2)
+            });
+        }
+        var v3 = trials.Where(x => x.Model == "V3").ToList();
+        var v3Test = v3.Skip((int)Math.Floor(v3.Count * .8)).ToList();
+        var randomTestForDecision = trials.Where(x => x.Model == "ALEATÓRIO").Skip((int)Math.Floor(v3.Count * .8)).ToList();
+        var diff = v3Test.Zip(randomTestForDecision, (a, b) => (double)(a.Net - b.Net)).ToList();
+        var avg = diff.DefaultIfEmpty().Average(); var std = diff.Count < 2 ? 0 : Math.Sqrt(diff.Sum(x => Math.Pow(x - avg, 2)) / (diff.Count - 1));
+        var lower = avg - (diff.Count < 2 ? 0 : 1.96 * std / Math.Sqrt(diff.Count));
+        var testCost = v3Test.Count * betAmount;
+        var v3TestRoi = testCost == 0 ? 0 : 100 * v3Test.Sum(x => x.Net) / testCost;
+        var decision = v3Test.Count < 100 ? "AMOSTRA INSUFICIENTE" : v3TestRoi > 0 && lower > 0
+            ? "SINAL POSITIVO — MANTER SOMENTE EM TESTE CONTROLADO" : "SEM EVIDÊNCIA DE VANTAGEM — REDUZIR OU PAUSAR EXPOSIÇÃO";
+        return new { bank, availableExtractions = extractions.Count, evaluatedExtractions = trials.Count / 3,
+            period = new { from = extractions[start].Date, to = extractions[^1].Date }, quantity, betAmount, dezenaPayout, centenaPayout, milharPayout,
+            models = modelRows, decision, methodology = "Walk-forward cronológico. Cada previsão usa somente resultados anteriores; V2 usa janela fixa de 90 dias, V3 usa a janela recomendada por horário. O último 20% é teste final. Aleatório recebe a mesma quantidade de números e cotações.",
+            interpretation = "O intervalo de 95% mede a diferença média de saldo por previsão contra o aleatório no teste. Se ele inclui zero, não há evidência estatística de superioridade.",
+            warning = "Esta bateria avalia desempenho histórico e não torna sorteios independentes previsíveis nem garante retorno futuro." };
+    }
+
+    private static List<Scored> Score(List<Row> rows, TimeOnly targetTime, Dictionary<string, int> priorAppearances, bool v3 = true)
     {
         if (rows.Count == 0) return [];
         var extractions = rows.GroupBy(x => x.ExtractionId).Select(g => new
@@ -502,8 +590,8 @@ public sealed class PredictionService(Db db)
         return Enumerable.Range(0, 10_000).Select(value =>
         {
             var m = value.ToString("0000"); var c = m[^3..]; var d = m[^2..];
-            var frequency = .10 * Norm(freqM, m) + .45 * Norm(freqC, c) + .45 * Norm(freqD, d);
-            var timeFrequency = .10 * Norm(timeM, m) + .45 * Norm(timeC, c) + .45 * Norm(timeD, d);
+            var frequency = v3 ? .10 * Norm(freqM, m) + .45 * Norm(freqC, c) + .45 * Norm(freqD, d) : .15 * Norm(freqM, m) + .35 * Norm(freqC, c) + .50 * Norm(freqD, d);
+            var timeFrequency = v3 ? .10 * Norm(timeM, m) + .45 * Norm(timeC, c) + .45 * Norm(timeD, d) : .15 * Norm(timeM, m) + .35 * Norm(timeC, c) + .50 * Norm(timeD, d);
             var continuity = Norm(recentD, d);
             var momentum = Math.Clamp(Norm(recentD, d) - Norm(longD, d), -1, 1);
             var transition = Norm(transitionD, d);

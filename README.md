@@ -73,6 +73,10 @@ Os scores são rankings relativos, não probabilidades calibradas. Em sorteios i
 - Cada previsão guarda o custo total e as cotações usadas. O padrão é R$ 30,00, com retornos de R$ 8,57 por
   dezena, R$ 57,14 por centena e R$ 296,30 por milhar.
 - O dashboard apresenta valor apostado, retorno, saldo e ROI, consolidados e separados por horário e data.
+- A tela de Análises inclui uma bateria de decisão que confronta V2, V3 e uma seleção aleatória com as
+  mesmas cotações. Ela executa walk-forward cronológico, usa apenas o passado em cada ponto e reserva os
+  20% finais para teste; a decisão só considera sinal positivo quando o ROI final e o intervalo contra o
+  aleatório permanecem positivos.
 
 O retorno financeiro é uma simulação baseada nos valores configurados na previsão; confira sempre as regras e
 cotações efetivamente aplicadas antes de apostar.

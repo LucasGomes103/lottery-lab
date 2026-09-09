@@ -20,6 +20,8 @@ export class AppComponent implements OnInit {
     preview: ImportPreview | null = null;
     forecast: any = null;
     backtest: any = null;
+    decisionBattery: any = null;
+    loadingDecisionBattery = false;
     ai = '';
     message = '';
     error = '';
@@ -452,6 +454,18 @@ export class AppComponent implements OnInit {
     analyze() {
         this.http.get(this.api + `/forecast?bank=${encodeURIComponent(this.bank)}&time=${this.analysisTime}&windowDays=${this.windowDays}&top=10`).subscribe(x => this.forecast = x);
         this.http.get(this.api + `/backtest?bank=${encodeURIComponent(this.bank)}&time=${this.analysisTime}&windowDays=${this.windowDays}&top=10`).subscribe(x => this.backtest = x);
+    }
+
+    runDecisionBattery() {
+        this.loadingDecisionBattery = true;
+        this.error = '';
+        const params = new URLSearchParams({ bank: this.bank, quantity: String(this.generationQuantity),
+            betAmount: String(this.betAmount), dezenaPayout: String(this.dezenaPayout),
+            centenaPayout: String(this.centenaPayout), milharPayout: String(this.milharPayout) });
+        this.http.get<any>(this.api + `/predictions/decision-battery?${params}`).subscribe({
+            next: response => { this.decisionBattery = response; this.loadingDecisionBattery = false; },
+            error: error => { this.error = this.errorMessage(error); this.loadingDecisionBattery = false; }
+        });
     }
 
     generateNumbers() {

@@ -358,6 +358,18 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         return Ok(await predictions.CompareWindows(bank.Trim(), target, quantity, parsedWindows, useSameDayResults));
     }
 
+    [HttpGet("predictions/decision-battery")]
+    [Authorize(Policy = Permissions.AnalysisUse)]
+    public async Task<IActionResult> PredictionDecisionBattery(string bank = "LT NACIONAL", int quantity = 8,
+        decimal betAmount = 30m, decimal dezenaPayout = 8.57m, decimal centenaPayout = 57.14m,
+        decimal milharPayout = 296.30m, int maxEvaluations = 1000)
+    {
+        if (!IsNational(bank)) return BadRequest(new { message = "Somente a banca LT NACIONAL é aceita." });
+        return Ok(await predictions.DecisionBattery(bank.Trim(), quantity, Math.Clamp(betAmount, 0m, 1_000_000m),
+            Math.Clamp(dezenaPayout, 0m, 1_000_000m), Math.Clamp(centenaPayout, 0m, 1_000_000m),
+            Math.Clamp(milharPayout, 0m, 1_000_000m), maxEvaluations));
+    }
+
     [HttpPost("predictions/{id:guid}/evaluate")]
     [Authorize(Policy = Permissions.PredictionsWrite)]
     public async Task<IActionResult> EvaluatePrediction(Guid id)
