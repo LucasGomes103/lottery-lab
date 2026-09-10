@@ -280,8 +280,8 @@ export class AppComponent implements OnInit {
             warnings: ['Preenchimento manual: confira todos os horários e resultados antes de confirmar.'],
             extractions: [{
                 bank: 'LT NACIONAL', date: localDate, time: null,
-                results: Array.from({ length: 7 }, (_, index) => this.emptyResult(index + 1)),
-                warnings: ['Informe o horário e os sete resultados.']
+                results: Array.from({ length: 10 }, (_, index) => this.emptyResult(index + 1)),
+                warnings: ['Informe o horário e os dez resultados.']
             }]
         };
         this.editingId = null;
@@ -565,14 +565,32 @@ export class AppComponent implements OnInit {
 
     recalculatePayouts() {
         const range = Math.min(10, Math.max(1, Number(this.prizeRange) || 1));
+        const quantity = Math.min(100, Math.max(1, Number(this.generationQuantity) || 1));
         this.prizeRange = range;
         this.dezenaStake = Math.max(0, Number(this.dezenaStake) || 0);
         this.centenaStake = Math.max(0, Number(this.centenaStake) || 0);
         this.milharStake = Math.max(0, Number(this.milharStake) || 0);
         this.betAmount = Math.round((this.dezenaStake + this.centenaStake + this.milharStake) * 100) / 100;
-        this.dezenaPayout = Math.round(this.dezenaStake * 90 / range * 100) / 100;
-        this.centenaPayout = Math.round(this.centenaStake * 900 / range * 100) / 100;
-        this.milharPayout = Math.round(this.milharStake * 9000 / range * 100) / 100;
+        this.dezenaPayout = Math.round(this.dezenaStake / quantity * 90 / range * 100) / 100;
+        this.centenaPayout = Math.round(this.centenaStake / quantity * 900 / range * 100) / 100;
+        this.milharPayout = Math.round(this.milharStake / quantity * 9000 / range * 100) / 100;
+    }
+
+    stakePerNumber(stake: number) {
+        const quantity = Math.min(100, Math.max(1, Number(this.generationQuantity) || 1));
+        return Math.max(0, Number(stake) || 0) / quantity;
+    }
+
+    applyFrequentReturnSuggestion() {
+        const total = Math.max(0, Number(this.betAmount) || 0);
+        this.dezenaStake = total;
+        this.centenaStake = 0;
+        this.milharStake = 0;
+        this.recalculatePayouts();
+    }
+
+    expectedReturn() {
+        return Math.round(Math.max(0, Number(this.betAmount) || 0) * 0.9 * 100) / 100;
     }
 
     money(value: number | null | undefined) {

@@ -42,9 +42,10 @@ public sealed class PredictionService(Db db)
         var centenaStake = Math.Clamp(request.CentenaStake, 0m, 1_000_000m);
         var milharStake = Math.Clamp(request.MilharStake, 0m, 1_000_000m);
         var betAmount = dezenaStake + centenaStake + milharStake;
-        var dezenaPayout = Math.Round(dezenaStake * 90m / prizeRange, 2);
-        var centenaPayout = Math.Round(centenaStake * 900m / prizeRange, 2);
-        var milharPayout = Math.Round(milharStake * 9000m / prizeRange, 2);
+        // O valor informado é o total da modalidade. Cada número recebe a sua fração desse total.
+        var dezenaPayout = Math.Round(dezenaStake / quantity * 90m / prizeRange, 2);
+        var centenaPayout = Math.Round(centenaStake / quantity * 900m / prizeRange, 2);
+        var milharPayout = Math.Round(milharStake / quantity * 9000m / prizeRange, 2);
         var requestedGroups = (request.Groups ?? []).Where(x => x is >= 1 and <= 25).Distinct().Order().ToArray();
         var groupKey = requestedGroups.Length == 0 ? "ALL" : string.Join('-', requestedGroups);
         var seed = StableSeed($"{Algorithm}:{Version}:{bank}:{date:yyyy-MM-dd}:{targetTime:HH:mm}:{windowDays}:{quantity}:{groupKey}");
@@ -83,7 +84,8 @@ public sealed class PredictionService(Db db)
             requestedWindowDays,
             usedRecommendedWindow = request.UseRecommendedWindow,
             prizeRange,
-            stakes = new { dezena = dezenaStake, centena = centenaStake, milhar = milharStake }
+            stakes = new { dezena = dezenaStake, centena = centenaStake, milhar = milharStake },
+            stakePerNumber = new { dezena = dezenaStake / quantity, centena = centenaStake / quantity, milhar = milharStake / quantity }
         };
 
         await using var transaction = await connection.BeginTransactionAsync();
