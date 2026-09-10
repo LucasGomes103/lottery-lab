@@ -289,6 +289,19 @@ public sealed class PredictionService(Db db)
         return await Detail(id);
     }
 
+    public async Task<int> ReevaluateHistoricalPredictions()
+    {
+        await using var connection = db.Open();
+        var targets = (await connection.QueryAsync<PredictionTarget>(
+            @"select distinct bank as Bank,target_date as TargetDate,target_time as TargetTime
+              from predictions where bank in ('LT NACIONAL','LOOK LOTERIAS')
+              order by target_date,target_time")).ToList();
+        foreach (var target in targets)
+            await EvaluatePending(target.Bank, DateOnly.FromDateTime(target.TargetDate),
+                $"{target.TargetTime.Hours:00}:{target.TargetTime.Minutes:00}");
+        return targets.Count;
+    }
+
     public async Task<int> Delete(IEnumerable<Guid> ids)
     {
         var uniqueIds = ids.Distinct().ToArray();

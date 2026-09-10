@@ -314,6 +314,14 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         return Ok(await predictions.GenerateAndSave(request));
     }
 
+    [HttpPost("predictions/reevaluate-history")]
+    [Authorize(Policy = Permissions.ImportsWrite)]
+    public async Task<IActionResult> ReevaluatePredictionHistory()
+    {
+        var processedTargets = await predictions.ReevaluateHistoricalPredictions();
+        return Ok(new { processedTargets, prizeRange = "1-5", message = "Previsões históricas recalculadas usando somente os prêmios do 1º ao 5º." });
+    }
+
     [HttpGet("predictions/animal-trends")]
     [Authorize(Policy = Permissions.AnalysisUse)]
     public async Task<IActionResult> AnimalTrends(string bank = "LT NACIONAL", string time = "21:00",
