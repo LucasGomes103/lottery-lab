@@ -27,7 +27,8 @@ public sealed class ResultFacilHistoryService(HttpClient http, Db db, Prediction
                 if (onlyMissingDates && await HasExtractions(bank, date)) { skipped++; }
                 else
                 {
-                    await Task.Delay(TimeSpan.FromMilliseconds(1250), cancellationToken);
+                    // A fonte aplica limite de requisições; 3,5 s evita bloqueio durante cargas longas.
+                    await Task.Delay(TimeSpan.FromMilliseconds(3500), cancellationToken);
                     imported += await SyncDate(bank, date, cancellationToken);
                 }
             }
