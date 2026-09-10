@@ -39,7 +39,7 @@ public sealed class PdfImportService(IConfiguration configuration, ILogger<PdfIm
         }
 
         if (extractions.Count == 0) warnings.Add("Nenhum horário reconhecido. Revise a qualidade do documento.");
-        else if (extractions.Any(x => x.Results.Count != 7)) warnings.Add("Um ou mais horários não possuem exatamente sete resultados e precisam de revisão.");
+        else if (extractions.Any(x => x.Results.Count != 10)) warnings.Add("Um ou mais horários não possuem exatamente dez resultados e precisam de revisão.");
         return new ImportPreview(fileName, hash, usedOcr, extractions, warnings);
     }
 
@@ -61,7 +61,7 @@ public sealed class PdfImportService(IConfiguration configuration, ILogger<PdfIm
             var warnings = new List<string>();
             var hour = int.Parse(header.Groups["h"].Value, CultureInfo.InvariantCulture);
             if (date is null) warnings.Add("Data não reconhecida.");
-            if (results.Count != 7) warnings.Add($"Foram reconhecidos {results.Count} de 7 resultados.");
+            if (results.Count != 10) warnings.Add($"Foram reconhecidos {results.Count} de 10 resultados.");
             if (results.Select(x => x.Position).Distinct().Count() != results.Count) warnings.Add("Existem posições repetidas.");
             extractions.Add(new ParsedExtraction(date, "LT NACIONAL", hour is >= 0 and <= 23 ? $"{hour:00}:00" : null, results, warnings));
         }
@@ -76,12 +76,12 @@ public sealed class PdfImportService(IConfiguration configuration, ILogger<PdfIm
             var position = int.Parse(match.Groups["p"].Value, CultureInfo.InvariantCulture);
             if (results.Count > 0 && (results.Any(x => x.Position == position) || position < results[^1].Position)) break;
             var digits = new string(match.Groups["n"].Value.Where(char.IsDigit).ToArray());
-            var expectedLength = position == 7 ? 3 : 4;
+            var expectedLength = 4;
             if (digits.Length > expectedLength) digits = digits[^expectedLength..];
             var number = digits.PadLeft(expectedLength, '0');
             var dezena = number.PadLeft(2, '0')[^2..];
             var centena = number.PadLeft(3, '0')[^3..];
-            var milhar = position == 7 ? null : number.PadLeft(4, '0')[^4..];
+            var milhar = number.PadLeft(4, '0')[^4..];
             var group = GroupFromDezena(dezena);
             var animal = group is >= 1 and <= 25 ? Animals[group - 1] : null;
             results.Add(new ParsedResult(position, number, milhar, centena, dezena, group, animal));
@@ -125,7 +125,7 @@ public sealed class PdfImportService(IConfiguration configuration, ILogger<PdfIm
                     .ToList();
                 var warnings = new List<string>();
                 if (sample.Date is null) warnings.Add("Data não reconhecida.");
-                if (results.Count != 7) warnings.Add($"Foram reconhecidos {results.Count} de 7 resultados.");
+                if (results.Count != 10) warnings.Add($"Foram reconhecidos {results.Count} de 10 resultados.");
                 return new ParsedExtraction(sample.Date, sample.Bank, sample.Time, results, warnings);
             })
             .OrderBy(x => x.Time)

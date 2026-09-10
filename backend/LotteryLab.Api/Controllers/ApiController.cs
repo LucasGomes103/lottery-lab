@@ -175,8 +175,8 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         if (extraction.Id == 0) return NotFound(new { message = "Extração não encontrada." });
 
         var results = (await connection.QueryAsync<ParsedResult>(
-            @"select position, number,
-                     case when position=7 then null else number end as milhar,
+            @"select position, lpad(number,4,'0') as number,
+                     lpad(number,4,'0') as milhar,
                      centena, dezena, group_no as ""Group"", animal
               from results where extraction_id=@id order by position", new { id })).ToList();
         return Ok(new ParsedExtraction(

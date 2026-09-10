@@ -374,13 +374,13 @@ export class AppComponent implements OnInit {
     }
 
     normalize(result: ParsedResult) {
-        const length = result.position === 7 ? 3 : 4;
+        const length = 4;
         const digits = result.number.replace(/\D/g, '');
         if (!digits) { result.number = ''; result.milhar = null; result.centena = null; result.dezena = null; result.group = null; result.animal = null; return; }
         result.number = digits.slice(-length).padStart(length, '0');
         result.dezena = result.number.slice(-2);
         result.centena = result.number.slice(-3);
-        result.milhar = result.position === 7 ? null : result.number;
+        result.milhar = result.number;
         const value = Number(result.dezena);
         result.group = value === 0 ? 25 : Math.ceil(value / 4);
         const animals = ['AVESTRUZ','AGUIA','BURRO','BORBOLETA','CACHORRO','CABRA','CARNEIRO','CAMELO','COBRA','COELHO','CAVALO','ELEFANTE','GALO','GATO','JACARE','LEAO','MACACO','PORCO','PAVAO','PERU','TOURO','TIGRE','URSO','VEADO','VACA'];
@@ -394,7 +394,7 @@ export class AppComponent implements OnInit {
             bank: sample?.bank || 'LT NACIONAL',
             date: sample?.date || null,
             time: null,
-            results: Array.from({ length: 7 }, (_, index) => this.emptyResult(index + 1)),
+            results: Array.from({ length: 10 }, (_, index) => this.emptyResult(index + 1)),
             warnings: ['Horário incluído manualmente. Preencha todos os resultados.']
         });
     }
