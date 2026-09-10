@@ -123,6 +123,64 @@ public sealed class PredictionService(Db db)
             prizeRange, dezenaStake, centenaStake, milharStake);
     }
 
+    public async Task<BankDayPredictionResponse> GenerateForBankDay(PredictionRequest request)
+    {
+        var source = await GenerateAndSave(request);
+        var schedules = source.Bank.Equals("LOOK LOTERIAS", StringComparison.OrdinalIgnoreCase)
+            ? new[] { "07:00", "09:00", "11:00", "14:00", "16:00", "18:00", "21:00", "23:00" }
+            : new[] { "02:00", "08:00", "10:00", "12:00", "15:00", "17:00", "21:00", "23:00" };
+        var predictions = new List<PredictionResponse> { source };
+        foreach (var targetTime in schedules.Where(x => x != source.Time))
+            predictions.Add(await SaveCopiedPrediction(source, targetTime));
+
+        return new BankDayPredictionResponse(source, predictions.OrderBy(x => x.Time).ToList(),
+            predictions.Sum(x => x.BetAmount),
+            $"A mesma lista de {source.Quantity} números foi registrada nos {predictions.Count} horários da banca. Cada horário é uma aposta e conferência independente.");
+    }
+
+    private async Task<PredictionResponse> SaveCopiedPrediction(PredictionResponse source, string targetTime)
+    {
+        var id = Guid.NewGuid();
+        var seed = StableSeed($"DAY_COPY:{source.Id}:{targetTime}");
+        var composition = new
+        {
+            samePredictionForAllBankTimes = true,
+            sourcePredictionId = source.Id,
+            sourceTime = source.Time,
+            sourceComposition = source.Composition
+        };
+        await using var connection = db.Open();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await connection.ExecuteAsync(
+            @"insert into predictions(id,bank,target_date,target_time,algorithm_code,algorithm_version,
+                window_days,quantity,random_seed,sample_extractions,sample_results,robustness,config,
+                bet_amount,dezena_payout,centena_payout,milhar_payout,prize_range,
+                dezena_stake,centena_stake,milhar_stake)
+              values(@id,@bank,@date,@time::time,@algorithm,@version,@windowDays,@quantity,@seed,
+                @sampleExtractions,@sampleResults,@robustness,@config::jsonb,
+                @betAmount,@dezenaPayout,@centenaPayout,@milharPayout,@prizeRange,
+                @dezenaStake,@centenaStake,@milharStake)",
+            new { id, bank = source.Bank, date = source.TargetDate.ToDateTime(TimeOnly.MinValue), time = targetTime,
+                algorithm = source.Algorithm, version = source.AlgorithmVersion, windowDays = source.WindowDays,
+                quantity = source.Quantity, seed, sampleExtractions = source.SampleExtractions, sampleResults = source.SampleResults,
+                robustness = source.Robustness, config = JsonSerializer.Serialize(composition, JsonOptions), source.BetAmount,
+                source.DezenaPayout, source.CentenaPayout, source.MilharPayout, source.PrizeRange,
+                source.DezenaStake, source.CentenaStake, source.MilharStake }, transaction);
+        foreach (var candidate in source.Numbers)
+            await connection.ExecuteAsync(
+                @"insert into prediction_candidates(prediction_id,rank,milhar,centena,dezena,group_no,
+                    selection_type,statistical_score,final_score,features,reasons)
+                  values(@id,@rank,@milhar,@centena,@dezena,@group,@selectionType,@statisticalScore,@finalScore,
+                    @features::jsonb,@reasons::jsonb)",
+                new { id, candidate.Rank, candidate.Milhar, candidate.Centena, candidate.Dezena, candidate.Group,
+                    candidate.SelectionType, candidate.StatisticalScore, candidate.FinalScore,
+                    features = JsonSerializer.Serialize(candidate.Features, JsonOptions),
+                    reasons = JsonSerializer.Serialize(candidate.Reasons, JsonOptions) }, transaction);
+        await transaction.CommitAsync();
+        await EvaluatePending(source.Bank, source.TargetDate, targetTime);
+        return source with { Id = id, Time = targetTime, RandomSeed = seed, Composition = composition };
+    }
+
     public async Task<PredictionResponse> SaveManual(ManualPredictionRequest request)
     {
         var bank = request.Bank.Trim();

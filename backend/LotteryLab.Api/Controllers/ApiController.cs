@@ -322,6 +322,15 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         return Ok(await predictions.GenerateAndSave(request));
     }
 
+    [HttpPost("predictions/generate-bank-day")]
+    [Authorize(Policy = Permissions.PredictionsWrite)]
+    public async Task<IActionResult> GeneratePredictionForBankDay(PredictionRequest request)
+    {
+        if (!IsNational(request.Bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
+        if (!TimeOnly.TryParse(request.Time, out _)) return BadRequest(new { message = "Horário inválido." });
+        return Ok(await predictions.GenerateForBankDay(request));
+    }
+
     [HttpPost("predictions/manual")]
     [Authorize(Policy = Permissions.PredictionsWrite)]
     public async Task<IActionResult> SaveManualPrediction(ManualPredictionRequest request)

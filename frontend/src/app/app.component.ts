@@ -12,6 +12,7 @@ interface HistoryResponse { items: HistoryItem[]; total: number; page: number; p
 interface ImportQueueItem { id: number; file?: File; fileName: string; status: 'waiting' | 'processing' | 'ready' | 'imported' | 'error'; preview?: ImportPreview; error?: string; }
 interface GeneratedNumber { rank: number; milhar: string; centena: string; dezena: string; group: number; selectionType: string; statisticalScore: number; finalScore: number; features: any; reasons: string[]; }
 interface GenerationResponse { id: string; algorithm: string; algorithmVersion: number; bank: string; time: string; targetDate: string; windowDays: number; quantity: number; randomSeed: number; sampleExtractions: number; sampleResults: number; robustness: string; composition: any; numbers: GeneratedNumber[]; warning: string; betAmount: number; dezenaPayout: number; centenaPayout: number; milharPayout: number; usedRecommendedWindow: boolean; prizeRange: number; dezenaStake: number; centenaStake: number; milharStake: number; }
+interface BankDayGenerationResponse { sourcePrediction: GenerationResponse; predictions: GenerationResponse[]; totalBetAmount: number; message: string; }
 
 @Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule], templateUrl: './app.component.html' })
 export class AppComponent implements OnInit {
@@ -70,6 +71,7 @@ export class AppComponent implements OnInit {
     dezenaStake = 10;
     centenaStake = 10;
     milharStake = 10;
+    generateForAllBankTimes = false;
     dezenaPayout = 180;
     centenaPayout = 1800;
     milharPayout = 18000;
@@ -373,7 +375,7 @@ export class AppComponent implements OnInit {
         this.applyRecommendedWindow();
     }
 
-    private schedulesFor() {
+    schedulesFor() {
         return this.bank === 'LOOK LOTERIAS'
             ? ['07:00', '09:00', '11:00', '14:00', '16:00', '18:00', '21:00', '23:00']
             : ['02:00', '08:00', '10:00', '12:00', '15:00', '17:00', '21:00', '23:00'];
@@ -553,8 +555,17 @@ export class AppComponent implements OnInit {
             useRecommendedWindow: this.useRecommendedWindow, betAmount: this.betAmount, prizeRange: this.prizeRange,
             dezenaStake: this.dezenaStake, centenaStake: this.centenaStake, milharStake: this.milharStake,
             groups: Array.from(this.selectedAnimalGroups) };
-        this.http.post<GenerationResponse>(this.api + '/predictions/generate', payload).subscribe({
-            next: response => { response.numbers = this.sortByGroupAndMilhar(response.numbers); this.generation = response; this.generationWindowDays = response.windowDays; this.generating = false; },
+        const endpoint = this.generateForAllBankTimes ? '/predictions/generate-bank-day' : '/predictions/generate';
+        this.http.post<GenerationResponse | BankDayGenerationResponse>(this.api + endpoint, payload).subscribe({
+            next: response => {
+                const batch = this.generateForAllBankTimes ? response as BankDayGenerationResponse : null;
+                const generated = batch ? batch.sourcePrediction : response as GenerationResponse;
+                generated.numbers = this.sortByGroupAndMilhar(generated.numbers);
+                this.generation = generated;
+                this.generationWindowDays = generated.windowDays;
+                this.message = batch ? batch.message + ` Total do dia: ${this.money(batch.totalBetAmount)}.` : '';
+                this.generating = false;
+            },
             error: error => { this.error = this.errorMessage(error); this.generating = false; }
         });
     }
@@ -629,6 +640,8 @@ export class AppComponent implements OnInit {
         this.centenaPayout = Math.round(this.centenaStake / quantity * 900 / range * 100) / 100;
         this.milharPayout = Math.round(this.milharStake / quantity * 9000 / range * 100) / 100;
     }
+
+    bankDayBetAmount() { return this.betAmount * this.schedulesFor().length; }
 
     stakePerNumber(stake: number) {
         const quantity = Math.min(100, Math.max(1, Number(this.generationQuantity) || 1));

@@ -28,6 +28,9 @@ public record PredictionResponse(
     decimal BetAmount, decimal DezenaPayout, decimal CentenaPayout, decimal MilharPayout,
     bool UsedRecommendedWindow, int PrizeRange, decimal DezenaStake, decimal CentenaStake, decimal MilharStake);
 
+public record BankDayPredictionResponse(PredictionResponse SourcePrediction, List<PredictionResponse> Predictions,
+    decimal TotalBetAmount, string Message);
+
 public record PredictionEvaluation(
     Guid PredictionId, long ExtractionId, bool HitMilhar, bool HitCentena, bool HitDezena,
     int? BestMilharPosition, int? BestCentenaPosition, int? BestDezenaPosition);
