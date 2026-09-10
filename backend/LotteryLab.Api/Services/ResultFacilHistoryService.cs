@@ -12,17 +12,21 @@ public sealed class ResultFacilHistoryService(HttpClient http, Db db, Prediction
     private static readonly Regex Number = new(@"""(?<position>\d+)_(?<number>\d{4})_\d{2}""", RegexOptions.Compiled);
     private static readonly string[] Animals = ["AVESTRUZ", "AGUIA", "BURRO", "BORBOLETA", "CACHORRO", "CABRA", "CARNEIRO", "CAMELO", "COBRA", "COELHO", "CAVALO", "ELEFANTE", "GALO", "GATO", "JACARE", "LEAO", "MACACO", "PORCO", "PAVAO", "PERU", "TOURO", "TIGRE", "URSO", "VEADO", "VACA"];
 
-    public async Task<object> Sync(string bank, DateOnly start, DateOnly end, CancellationToken cancellationToken)
+    public async Task<object> Sync(string bank, DateOnly start, DateOnly end, CancellationToken cancellationToken,
+        Action<int, int, string>? reportProgress = null)
     {
         if (end < start) throw new ArgumentException("A data final deve ser igual ou posterior à inicial.");
         if (end.DayNumber - start.DayNumber > 3650) throw new ArgumentException("O intervalo máximo é de 10 anos.");
         var imported = 0; var skipped = 0; var errors = new List<string>();
+        var totalDays = end.DayNumber - start.DayNumber + 1; var completedDays = 0;
         for (var date = start; date <= end; date = date.AddDays(1))
         {
+            reportProgress?.Invoke(completedDays, totalDays, $"Consultando {bank} em {date:dd/MM/yyyy}");
             try { imported += await SyncDate(bank, date, cancellationToken); }
             catch (Exception exception) { skipped++; errors.Add($"{date:dd/MM/yyyy}: {exception.Message}"); }
+            completedDays++; reportProgress?.Invoke(completedDays, totalDays, $"Processado {date:dd/MM/yyyy}");
         }
-        return new { bank, start, end, importedExtractions = imported, skippedDays = skipped, errors, source = "https://www.resultadofacil.com.br/" };
+        return new { bank, start, end, daysProcessed = completedDays, importedExtractions = imported, skippedDays = skipped, errors, source = "https://www.resultadofacil.com.br/" };
     }
 
     private async Task<int> SyncDate(string bank, DateOnly date, CancellationToken cancellationToken)

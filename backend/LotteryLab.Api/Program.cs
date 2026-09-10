@@ -34,6 +34,7 @@ builder.Services.AddScoped<AiService>();
 builder.Services.AddScoped<NumberGeneratorService>();
 builder.Services.AddScoped<PredictionService>();
 builder.Services.AddSingleton<DecisionBatteryJobService>();
+builder.Services.AddSingleton<HistorySyncJobService>();
 builder.Services.AddSingleton<ExternalResultsState>();
 builder.Services.AddHttpClient<ExternalResultsService>(client =>
 {

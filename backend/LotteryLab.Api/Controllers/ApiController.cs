@@ -13,7 +13,7 @@ namespace LotteryLab.Api.Controllers;
 [Authorize]
 public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService analysis, AiService ai,
     NumberGeneratorService generator, PredictionService predictions, DecisionBatteryJobService decisionBatteryJobs,
-    ExternalResultsService externalResults, ResultFacilHistoryService resultFacilHistory) : ControllerBase
+    ExternalResultsService externalResults, HistorySyncJobService historySyncJobs) : ControllerBase
 {
     [HttpPost("imports/preview")]
     [Authorize(Policy = Permissions.ImportsWrite)]
@@ -44,11 +44,17 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
 
     [HttpPost("imports/history-sync")]
     [Authorize(Policy = Permissions.ImportsWrite)]
-    public async Task<IActionResult> SyncHistory(string bank, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default)
+    public IActionResult SyncHistory(string bank, DateOnly startDate, DateOnly endDate)
     {
         if (!IsSupportedBank(bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
-        return Ok(await resultFacilHistory.Sync(bank.Trim().ToUpperInvariant(), startDate, endDate, cancellationToken));
+        if (endDate < startDate || endDate.DayNumber - startDate.DayNumber > 3650)
+            return BadRequest(new { message = "Informe um intervalo de até 10 anos." });
+        return Accepted(historySyncJobs.Start(bank.Trim().ToUpperInvariant(), startDate, endDate));
     }
+
+    [HttpGet("imports/history-sync/jobs/{id:guid}")]
+    [Authorize(Policy = Permissions.ImportsWrite)]
+    public IActionResult HistorySyncJob(Guid id) => historySyncJobs.Get(id) is { } job ? Ok(job) : NotFound(new { message = "Carga não encontrada." });
 
     [HttpGet("imports/sync/status")]
     [Authorize(Policy = Permissions.ImportsWrite)]

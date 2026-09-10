@@ -32,6 +32,8 @@ export class AppComponent implements OnInit {
     syncDate = this.localDate();
     syncingExternal = false;
     syncingHistory = false;
+    historySyncJob: any = null;
+    private historySyncPoll: ReturnType<typeof setInterval> | null = null;
     historySyncBank = 'LT NACIONAL';
     historySyncStartDate = '2026-01-01';
     historySyncEndDate = this.localDate();
@@ -313,10 +315,30 @@ export class AppComponent implements OnInit {
         this.syncingHistory = true;
         this.error = '';
         const params = new URLSearchParams({ bank: this.historySyncBank, startDate: this.historySyncStartDate, endDate: this.historySyncEndDate });
+        this.historySyncResult = null;
+        this.historySyncJob = null;
         this.http.post<any>(this.api + `/imports/history-sync?${params}`, {}).subscribe({
-            next: response => { this.historySyncResult = response; this.syncingHistory = false; this.loadHistory(1); },
+            next: job => { this.historySyncJob = job; this.pollHistorySync(job.id); },
             error: error => { this.error = this.errorMessage(error); this.syncingHistory = false; }
         });
+    }
+
+    private pollHistorySync(id: string) {
+        if (this.historySyncPoll) clearInterval(this.historySyncPoll);
+        const poll = () => this.http.get<any>(this.api + `/imports/history-sync/jobs/${id}`).subscribe({
+            next: job => {
+                this.historySyncJob = job;
+                if (job.status === 'COMPLETED') { this.historySyncResult = job.result; this.syncingHistory = false; this.stopHistorySyncPoll(); this.loadHistory(1); }
+                if (job.status === 'FAILED') { this.error = job.error || 'A carga histórica falhou.'; this.syncingHistory = false; this.stopHistorySyncPoll(); }
+            },
+            error: error => { this.error = this.errorMessage(error); this.syncingHistory = false; this.stopHistorySyncPoll(); }
+        });
+        poll(); this.historySyncPoll = setInterval(poll, 1200);
+    }
+
+    private stopHistorySyncPoll() {
+        if (this.historySyncPoll) clearInterval(this.historySyncPoll);
+        this.historySyncPoll = null;
     }
 
     loadExternalSyncStatus() {

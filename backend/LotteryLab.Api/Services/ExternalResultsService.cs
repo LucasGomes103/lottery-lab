@@ -12,12 +12,15 @@ public sealed class ExternalResultsState
     public DateTimeOffset? LastSuccess { get; set; }
     public string? LastError { get; set; }
     public int LastInserted { get; set; }
+    public DateTimeOffset? LookLastSuccess { get; set; }
+    public string? LookLastError { get; set; }
+    public int LookLastInserted { get; set; }
 }
 
 public sealed record ExternalSyncResult(DateOnly Date, int Inserted, int AlreadyPresent,
     List<string> InsertedTimes, List<string> UnavailableTimes, string Source, DateTimeOffset CheckedAt);
 
-public sealed class ExternalResultsService(HttpClient http, Db db, PredictionService predictions,
+public sealed class ExternalResultsService(HttpClient http, Db db, PredictionService predictions, ResultFacilHistoryService history,
     ExternalResultsState state, ILogger<ExternalResultsService> logger)
 {
     private const string Bank = "LT NACIONAL";
@@ -47,7 +50,7 @@ public sealed class ExternalResultsService(HttpClient http, Db db, PredictionSer
                 (date == DateOnly.FromDateTime(now.DateTime) && TimeOnly.Parse(schedule).AddMinutes(10) <= TimeOnly.FromDateTime(now.DateTime))).ToHashSet();
             var national = payload.Data.Where(x => x.Lottery.Equals("Nacional", StringComparison.OrdinalIgnoreCase)
                 && x.ResultType == "TD" && eligibleSchedules.Contains(x.Time) && int.TryParse(x.Prize, out var prize)
-                && prize is >= 1 and <= 7).GroupBy(x => x.Time).ToDictionary(x => x.Key, x => x.OrderBy(r => int.Parse(r.Prize)).ToList());
+                && prize is >= 1 and <= 10).GroupBy(x => x.Time).ToDictionary(x => x.Key, x => x.OrderBy(r => int.Parse(r.Prize)).ToList());
 
             await using var connection = db.Open();
             var existing = (await connection.QueryAsync<TimeSpan>(
@@ -59,7 +62,7 @@ public sealed class ExternalResultsService(HttpClient http, Db db, PredictionSer
             foreach (var schedule in eligibleSchedules.Order())
             {
                 if (existing.Contains(schedule)) continue;
-                if (!national.TryGetValue(schedule, out var sourceRows) || sourceRows.Count != 7)
+                if (!national.TryGetValue(schedule, out var sourceRows) || sourceRows.Count != 10)
                 {
                     unavailable.Add(schedule); continue;
                 }
@@ -73,8 +76,7 @@ public sealed class ExternalResultsService(HttpClient http, Db db, PredictionSer
                 foreach (var row in sourceRows)
                 {
                     var position = int.Parse(row.Prize);
-                    var expectedLength = position == 7 ? 3 : 4;
-                    var digits = new string(row.Result.Where(char.IsDigit).ToArray()).PadLeft(expectedLength, '0')[^expectedLength..];
+                    var digits = new string(row.Result.Where(char.IsDigit).ToArray()).PadLeft(4, '0')[^4..];
                     var dezena = digits[^2..]; var centena = digits[^3..];
                     var value = int.Parse(dezena); var group = value == 0 ? 25 : (value + 3) / 4;
                     await connection.ExecuteAsync(
@@ -100,7 +102,23 @@ public sealed class ExternalResultsService(HttpClient http, Db db, PredictionSer
     }
 
     public object Status() => new { state.LastAttempt, state.LastSuccess, state.LastError, state.LastInserted,
+        look = new { state.LookLastSuccess, state.LookLastError, state.LookLastInserted, schedules = new[] { "07:00", "09:00", "11:00", "14:00", "16:00", "18:00", "21:00", "23:00" } },
         intervalMinutes = 5, source = "https://resultadonacional.com/", ignoredLottery = "26 da Sorte" };
+
+    public async Task SyncLook(DateOnly date, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await history.Sync("LOOK LOTERIAS", date, date, cancellationToken);
+            var inserted = (int)(result.GetType().GetProperty("importedExtractions")?.GetValue(result) ?? 0);
+            state.LookLastSuccess = DateTimeOffset.UtcNow; state.LookLastError = null; state.LookLastInserted = inserted;
+        }
+        catch (Exception exception)
+        {
+            state.LookLastError = exception.Message;
+            logger.LogError(exception, "Falha ao sincronizar automaticamente Look Loterias de {Date}", date);
+        }
+    }
 
     private static DateTimeOffset SaoPauloNow()
     {
@@ -132,6 +150,7 @@ public sealed class ExternalResultsWorker(IServiceScopeFactory scopeFactory, ILo
                 var zone = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
                 var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, zone).DateTime);
                 await service.Sync(today, stoppingToken);
+                await service.SyncLook(today, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception) { logger.LogWarning(exception, "Sincronização automática será tentada novamente."); }
