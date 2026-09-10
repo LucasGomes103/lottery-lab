@@ -13,7 +13,7 @@ namespace LotteryLab.Api.Controllers;
 [Authorize]
 public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService analysis, AiService ai,
     NumberGeneratorService generator, PredictionService predictions, DecisionBatteryJobService decisionBatteryJobs,
-    ExternalResultsService externalResults) : ControllerBase
+    ExternalResultsService externalResults, ResultFacilHistoryService resultFacilHistory) : ControllerBase
 {
     [HttpPost("imports/preview")]
     [Authorize(Policy = Permissions.ImportsWrite)]
@@ -40,6 +40,14 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         if (target > DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3)))
             return BadRequest(new { message = "Não é possível sincronizar uma data futura." });
         return Ok(await externalResults.Sync(target, cancellationToken));
+    }
+
+    [HttpPost("imports/history-sync")]
+    [Authorize(Policy = Permissions.ImportsWrite)]
+    public async Task<IActionResult> SyncHistory(string bank, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default)
+    {
+        if (!IsSupportedBank(bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
+        return Ok(await resultFacilHistory.Sync(bank.Trim().ToUpperInvariant(), startDate, endDate, cancellationToken));
     }
 
     [HttpGet("imports/sync/status")]

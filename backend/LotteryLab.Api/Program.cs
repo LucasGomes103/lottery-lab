@@ -41,6 +41,7 @@ builder.Services.AddHttpClient<ExternalResultsService>(client =>
     client.Timeout = TimeSpan.FromSeconds(30);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("LotteryLab/1.0 (+result synchronization)");
 });
+builder.Services.AddHttpClient<ResultFacilHistoryService>(client => client.BaseAddress = new Uri("https://www.resultadofacil.com.br/"));
 builder.Services.AddHostedService<ExternalResultsWorker>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ??
     ["https://lottery-lab.gomeslucas103.workers.dev", "http://localhost:4200"];
