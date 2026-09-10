@@ -309,7 +309,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     [Authorize(Policy = Permissions.PredictionsWrite)]
     public async Task<IActionResult> GeneratePrediction(PredictionRequest request)
     {
-        if (!IsNational(request.Bank)) return BadRequest(new { message = "Somente a banca LT NACIONAL é aceita." });
+        if (!IsNational(request.Bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
         if (!TimeOnly.TryParse(request.Time, out _)) return BadRequest(new { message = "Horário inválido." });
         return Ok(await predictions.GenerateAndSave(request));
     }
@@ -371,24 +371,24 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     [Authorize(Policy = Permissions.AnalysisUse)]
     public async Task<IActionResult> PredictionDecisionBattery(string bank = "LT NACIONAL", int quantity = 8,
         decimal betAmount = 30m, decimal dezenaPayout = 8.57m, decimal centenaPayout = 57.14m,
-        decimal milharPayout = 296.30m, int maxEvaluations = 500)
+        decimal milharPayout = 296.30m, int prizeRange = 5, int maxEvaluations = 500)
     {
-        if (!IsNational(bank)) return BadRequest(new { message = "Somente a banca LT NACIONAL é aceita." });
+        if (!IsNational(bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
         return Ok(await predictions.DecisionBattery(bank.Trim(), quantity, Math.Clamp(betAmount, 0m, 1_000_000m),
             Math.Clamp(dezenaPayout, 0m, 1_000_000m), Math.Clamp(centenaPayout, 0m, 1_000_000m),
-            Math.Clamp(milharPayout, 0m, 1_000_000m), maxEvaluations));
+            Math.Clamp(milharPayout, 0m, 1_000_000m), Math.Clamp(prizeRange, 1, 10), maxEvaluations));
     }
 
     [HttpPost("predictions/decision-battery/jobs")]
     [Authorize(Policy = Permissions.AnalysisUse)]
     public IActionResult StartPredictionDecisionBattery(string bank = "LT NACIONAL", int quantity = 8,
         decimal betAmount = 30m, decimal dezenaPayout = 8.57m, decimal centenaPayout = 57.14m,
-        decimal milharPayout = 296.30m, int maxEvaluations = 500)
+        decimal milharPayout = 296.30m, int prizeRange = 5, int maxEvaluations = 500)
     {
-        if (!IsNational(bank)) return BadRequest(new { message = "Somente a banca LT NACIONAL é aceita." });
+        if (!IsNational(bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
         return Accepted(decisionBatteryJobs.Start(bank.Trim(), Math.Clamp(quantity, 1, 100), Math.Clamp(betAmount, 0m, 1_000_000m),
             Math.Clamp(dezenaPayout, 0m, 1_000_000m), Math.Clamp(centenaPayout, 0m, 1_000_000m),
-            Math.Clamp(milharPayout, 0m, 1_000_000m), maxEvaluations));
+            Math.Clamp(milharPayout, 0m, 1_000_000m), Math.Clamp(prizeRange, 1, 10), maxEvaluations));
     }
 
     [HttpGet("predictions/decision-battery/jobs/{id:guid}")]

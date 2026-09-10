@@ -17,7 +17,7 @@ public sealed class DecisionBatteryJobService(IServiceScopeFactory scopes)
     private readonly ConcurrentDictionary<Guid, Job> jobs = new();
 
     public object Start(string bank, int quantity, decimal betAmount, decimal dezenaPayout,
-        decimal centenaPayout, decimal milharPayout, int maxEvaluations)
+        decimal centenaPayout, decimal milharPayout, int prizeRange, int maxEvaluations)
     {
         var job = new Job();
         jobs[job.Id] = job;
@@ -28,7 +28,7 @@ public sealed class DecisionBatteryJobService(IServiceScopeFactory scopes)
                 await using var scope = scopes.CreateAsyncScope();
                 var predictions = scope.ServiceProvider.GetRequiredService<PredictionService>();
                 job.Result = await predictions.DecisionBattery(bank, quantity, betAmount, dezenaPayout, centenaPayout,
-                    milharPayout, maxEvaluations, (completed, total) => { job.Completed = completed; job.Total = total; });
+                    milharPayout, prizeRange, maxEvaluations, (completed, total) => { job.Completed = completed; job.Total = total; });
                 job.Status = "COMPLETED";
             }
             catch (Exception exception)

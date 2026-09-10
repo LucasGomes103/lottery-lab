@@ -41,6 +41,10 @@ public sealed class PredictionSchema(Db db)
             dezena_payout numeric(12,2) not null default 8.57,
             centena_payout numeric(12,2) not null default 57.14,
             milhar_payout numeric(12,2) not null default 296.30,
+            prize_range integer not null default 5,
+            dezena_stake numeric(12,2) not null default 0,
+            centena_stake numeric(12,2) not null default 0,
+            milhar_stake numeric(12,2) not null default 0,
             status varchar(30) not null default 'PENDING',
             generated_at timestamptz not null default now()
         );
@@ -90,6 +94,10 @@ public sealed class PredictionSchema(Db db)
         alter table predictions add column if not exists dezena_payout numeric(12,2) not null default 8.57;
         alter table predictions add column if not exists centena_payout numeric(12,2) not null default 57.14;
         alter table predictions add column if not exists milhar_payout numeric(12,2) not null default 296.30;
+        alter table predictions add column if not exists prize_range integer not null default 5;
+        alter table predictions add column if not exists dezena_stake numeric(12,2) not null default 0;
+        alter table predictions add column if not exists centena_stake numeric(12,2) not null default 0;
+        alter table predictions add column if not exists milhar_stake numeric(12,2) not null default 0;
         alter table prediction_evaluations add column if not exists return_amount numeric(12,2) not null default 0;
         alter table prediction_evaluations add column if not exists profit_amount numeric(12,2) not null default 0;
 

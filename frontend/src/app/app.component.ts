@@ -11,7 +11,7 @@ interface HistoryItem { id: number; bank: string; extraction_date: string; extra
 interface HistoryResponse { items: HistoryItem[]; total: number; page: number; pageSize: number; totalPages: number; }
 interface ImportQueueItem { id: number; file?: File; fileName: string; status: 'waiting' | 'processing' | 'ready' | 'imported' | 'error'; preview?: ImportPreview; error?: string; }
 interface GeneratedNumber { rank: number; milhar: string; centena: string; dezena: string; group: number; selectionType: string; statisticalScore: number; finalScore: number; features: any; reasons: string[]; }
-interface GenerationResponse { id: string; algorithm: string; algorithmVersion: number; bank: string; time: string; targetDate: string; windowDays: number; quantity: number; randomSeed: number; sampleExtractions: number; sampleResults: number; robustness: string; composition: any; numbers: GeneratedNumber[]; warning: string; betAmount: number; dezenaPayout: number; centenaPayout: number; milharPayout: number; usedRecommendedWindow: boolean; }
+interface GenerationResponse { id: string; algorithm: string; algorithmVersion: number; bank: string; time: string; targetDate: string; windowDays: number; quantity: number; randomSeed: number; sampleExtractions: number; sampleResults: number; robustness: string; composition: any; numbers: GeneratedNumber[]; warning: string; betAmount: number; dezenaPayout: number; centenaPayout: number; milharPayout: number; usedRecommendedWindow: boolean; prizeRange: number; dezenaStake: number; centenaStake: number; milharStake: number; }
 
 @Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule], templateUrl: './app.component.html' })
 export class AppComponent implements OnInit {
@@ -31,6 +31,11 @@ export class AppComponent implements OnInit {
     queueProcessing = false;
     syncDate = this.localDate();
     syncingExternal = false;
+    syncingHistory = false;
+    historySyncBank = 'LT NACIONAL';
+    historySyncStartDate = '2026-01-01';
+    historySyncEndDate = this.localDate();
+    historySyncResult: any = null;
     externalSyncStatus: any = null;
     externalSyncResult: any = null;
     importQueue: ImportQueueItem[] = [];
@@ -59,9 +64,13 @@ export class AppComponent implements OnInit {
     generationWindowDays = 240;
     useRecommendedWindow = true;
     betAmount = 30;
-    dezenaPayout = 8.57;
-    centenaPayout = 57.14;
-    milharPayout = 296.30;
+    prizeRange = 5;
+    dezenaStake = 10;
+    centenaStake = 10;
+    milharStake = 10;
+    dezenaPayout = 180;
+    centenaPayout = 1800;
+    milharPayout = 18000;
     generation: GenerationResponse | null = null;
     animalTrends: any = null;
     loadingAnimalTrends = false;
@@ -299,6 +308,17 @@ export class AppComponent implements OnInit {
         });
     }
 
+    syncHistoryRange() {
+        if (this.syncingHistory) return;
+        this.syncingHistory = true;
+        this.error = '';
+        const params = new URLSearchParams({ bank: this.historySyncBank, startDate: this.historySyncStartDate, endDate: this.historySyncEndDate });
+        this.http.post<any>(this.api + `/imports/history-sync?${params}`, {}).subscribe({
+            next: response => { this.historySyncResult = response; this.syncingHistory = false; this.loadHistory(1); },
+            error: error => { this.error = this.errorMessage(error); this.syncingHistory = false; }
+        });
+    }
+
     loadExternalSyncStatus() {
         this.http.get<any>(this.api + '/imports/sync/status').subscribe({
             next: response => this.externalSyncStatus = response,
@@ -465,7 +485,8 @@ export class AppComponent implements OnInit {
         this.error = '';
         const params = new URLSearchParams({ bank: this.bank, quantity: String(this.generationQuantity),
             betAmount: String(this.betAmount), dezenaPayout: String(this.dezenaPayout),
-            centenaPayout: String(this.centenaPayout), milharPayout: String(this.milharPayout) });
+            centenaPayout: String(this.centenaPayout), milharPayout: String(this.milharPayout),
+            prizeRange: String(this.prizeRange) });
         this.http.post<any>(this.api + `/predictions/decision-battery/jobs?${params}`, {}).subscribe({
             next: job => { this.decisionBatteryJob = job; this.pollDecisionBattery(job.id); },
             error: error => { this.error = this.errorMessage(error); this.loadingDecisionBattery = false; }
@@ -496,8 +517,8 @@ export class AppComponent implements OnInit {
         this.error = '';
         const payload = { bank: this.bank, time: this.time, targetDate: this.generationDate,
             windowDays: this.generationWindowDays, quantity: this.generationQuantity,
-            useRecommendedWindow: this.useRecommendedWindow, betAmount: this.betAmount,
-            dezenaPayout: this.dezenaPayout, centenaPayout: this.centenaPayout, milharPayout: this.milharPayout,
+            useRecommendedWindow: this.useRecommendedWindow, betAmount: this.betAmount, prizeRange: this.prizeRange,
+            dezenaStake: this.dezenaStake, centenaStake: this.centenaStake, milharStake: this.milharStake,
             groups: Array.from(this.selectedAnimalGroups) };
         this.http.post<GenerationResponse>(this.api + '/predictions/generate', payload).subscribe({
             next: response => { this.generation = response; this.generationWindowDays = response.windowDays; this.generating = false; },
@@ -526,19 +547,32 @@ export class AppComponent implements OnInit {
         this.applyRecommendedWindow();
     }
 
+    onGenerationBankChange(value: string) {
+        this.bank = value;
+        const look = value === 'LOOK LOTERIAS';
+        this.time = look ? '07:00' : '21:00';
+        this.analysisTime = this.time;
+        this.applyRecommendedWindow();
+    }
+
     applyRecommendedWindow() {
         if (!this.useRecommendedWindow) return;
-        const windows: Record<string, number> = { '02:00': 120, '08:00': 180, '10:00': 240, '12:00': 240,
-            '15:00': 240, '17:00': 30, '21:00': 240, '23:00': 60 };
+        const windows: Record<string, number> = { '02:00': 120, '07:00': 180, '08:00': 180, '09:00': 180, '10:00': 240, '11:00': 240, '12:00': 240,
+            '14:00': 240, '15:00': 240, '16:00': 240, '17:00': 30, '18:00': 180, '21:00': 240, '23:00': 60 };
         const normalizedTime = String(this.time || '').slice(0, 5);
         this.generationWindowDays = windows[normalizedTime] || 180;
     }
 
     recalculatePayouts() {
-        const factor = Math.max(0, Number(this.betAmount) || 0) / 30;
-        this.dezenaPayout = Math.round(8.57 * factor * 100) / 100;
-        this.centenaPayout = Math.round(57.14 * factor * 100) / 100;
-        this.milharPayout = Math.round(296.30 * factor * 100) / 100;
+        const range = Math.min(10, Math.max(1, Number(this.prizeRange) || 1));
+        this.prizeRange = range;
+        this.dezenaStake = Math.max(0, Number(this.dezenaStake) || 0);
+        this.centenaStake = Math.max(0, Number(this.centenaStake) || 0);
+        this.milharStake = Math.max(0, Number(this.milharStake) || 0);
+        this.betAmount = Math.round((this.dezenaStake + this.centenaStake + this.milharStake) * 100) / 100;
+        this.dezenaPayout = Math.round(this.dezenaStake * 90 / range * 100) / 100;
+        this.centenaPayout = Math.round(this.centenaStake * 900 / range * 100) / 100;
+        this.milharPayout = Math.round(this.milharStake * 9000 / range * 100) / 100;
     }
 
     money(value: number | null | undefined) {
