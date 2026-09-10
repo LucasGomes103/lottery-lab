@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Dapper;
 using LotteryLab.Api.Data;
 using LotteryLab.Api.Models;
@@ -120,6 +121,49 @@ public sealed class PredictionService(Db db)
             "Os scores são rankings estatísticos, não probabilidades nem garantia de acerto. A vantagem deve ser confirmada por backtest fora da amostra.",
             betAmount, dezenaPayout, centenaPayout, milharPayout, request.UseRecommendedWindow,
             prizeRange, dezenaStake, centenaStake, milharStake);
+    }
+
+    public async Task<PredictionResponse> SaveManual(ManualPredictionRequest request)
+    {
+        var bank = request.Bank.Trim();
+        if (!TimeOnly.TryParse(request.Time, out var targetTime)) throw new ArgumentException("Horário inválido.");
+        var cleaned = Regex.Replace(request.Numbers ?? "", @"\[[^\]]*\]", " ");
+        var milhares = Regex.Matches(cleaned, @"(?<!\d)\d{4}(?!\d)").Select(x => x.Value).Distinct().Take(100).ToList();
+        if (milhares.Count == 0) throw new ArgumentException("Cole ao menos uma milhar de quatro dígitos.");
+        var prizeRange = Math.Clamp(request.PrizeRange, 1, 10);
+        var dezenaStake = Math.Clamp(request.DezenaStake, 0m, 1_000_000m);
+        var centenaStake = Math.Clamp(request.CentenaStake, 0m, 1_000_000m);
+        var milharStake = Math.Clamp(request.MilharStake, 0m, 1_000_000m);
+        var betAmount = dezenaStake + centenaStake + milharStake;
+        var dezenaPayout = Math.Round(dezenaStake / milhares.Count * 90m / prizeRange, 2);
+        var centenaPayout = Math.Round(centenaStake / milhares.Count * 900m / prizeRange, 2);
+        var milharPayout = Math.Round(milharStake / milhares.Count * 9000m / prizeRange, 2);
+        var id = Guid.NewGuid();
+        var seed = StableSeed($"MANUAL:{bank}:{request.TargetDate:yyyy-MM-dd}:{targetTime:HH:mm}:{string.Join(',', milhares)}");
+        var candidates = milhares.Select((milhar, index) => new PredictionCandidate(index + 1, milhar, milhar[^3..], milhar[^2..],
+            GroupOf(milhar), "MANUAL", 0, 0, new PredictionFeatures(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            ["Aposta inserida manualmente."])).ToList();
+        var composition = new { manual = true, prizeRange, stakes = new { dezena = dezenaStake, centena = centenaStake, milhar = milharStake },
+            stakePerNumber = new { dezena = dezenaStake / milhares.Count, centena = centenaStake / milhares.Count, milhar = milharStake / milhares.Count } };
+        await using var connection = db.Open();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await connection.ExecuteAsync(
+            @"insert into predictions(id,bank,target_date,target_time,algorithm_code,algorithm_version,window_days,quantity,random_seed,sample_extractions,sample_results,robustness,config,
+                bet_amount,dezena_payout,centena_payout,milhar_payout,prize_range,dezena_stake,centena_stake,milhar_stake)
+              values(@id,@bank,@date,@time::time,'MANUAL_BET',1,0,@quantity,@seed,0,0,'MANUAL',@config::jsonb,
+                @betAmount,@dezenaPayout,@centenaPayout,@milharPayout,@prizeRange,@dezenaStake,@centenaStake,@milharStake)",
+            new { id, bank, date = request.TargetDate.ToDateTime(TimeOnly.MinValue), time = targetTime.ToString("HH:mm"), quantity = milhares.Count, seed,
+                config = JsonSerializer.Serialize(composition, JsonOptions), betAmount, dezenaPayout, centenaPayout, milharPayout, prizeRange, dezenaStake, centenaStake, milharStake }, transaction);
+        foreach (var candidate in candidates)
+            await connection.ExecuteAsync(@"insert into prediction_candidates(prediction_id,rank,milhar,centena,dezena,group_no,selection_type,statistical_score,final_score,features,reasons)
+                values(@id,@Rank,@Milhar,@Centena,@Dezena,@Group,@SelectionType,@StatisticalScore,@FinalScore,@features::jsonb,@reasons::jsonb)",
+                new { id, candidate.Rank, candidate.Milhar, candidate.Centena, candidate.Dezena, candidate.Group, candidate.SelectionType,
+                    candidate.StatisticalScore, candidate.FinalScore, features = JsonSerializer.Serialize(candidate.Features, JsonOptions), reasons = JsonSerializer.Serialize(candidate.Reasons, JsonOptions) }, transaction);
+        await transaction.CommitAsync();
+        await EvaluatePending(bank, request.TargetDate, targetTime.ToString("HH:mm"));
+        return new PredictionResponse(id, "MANUAL_BET", 1, bank, targetTime.ToString("HH:mm"), request.TargetDate, 0, milhares.Count, seed, 0, 0, "MANUAL",
+            composition, candidates, "Aposta manual registrada para conferência posterior.", betAmount, dezenaPayout, centenaPayout, milharPayout,
+            false, prizeRange, dezenaStake, centenaStake, milharStake);
     }
 
     public async Task<AnimalTrendResponse> AnimalTrends(string bank, string time, DateOnly targetDate, int windowDays)

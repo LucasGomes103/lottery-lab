@@ -7,6 +7,9 @@ public record PredictionRequest(string Bank, string Time, DateOnly? TargetDate =
     decimal DezenaStake = 10m, decimal CentenaStake = 10m, decimal MilharStake = 10m);
 public record PredictionDeleteRequest(List<Guid> Ids);
 
+public record ManualPredictionRequest(string Bank, string Time, DateOnly TargetDate, string Numbers,
+    int PrizeRange = 5, decimal DezenaStake = 0m, decimal CentenaStake = 0m, decimal MilharStake = 0m);
+
 public record PredictionFeatures(
     double Frequency, double TimeFrequency, double Delay, double Continuity,
     double Transition, double Momentum, double Reversal, double DigitAffinity,

@@ -73,6 +73,15 @@ export class AppComponent implements OnInit {
     dezenaPayout = 180;
     centenaPayout = 1800;
     milharPayout = 18000;
+    manualBank = 'LT NACIONAL';
+    manualTime = '12:00';
+    manualDate = this.localDate();
+    manualPrizeRange = 5;
+    manualDezenaStake = 0;
+    manualCentenaStake = 0;
+    manualMilharStake = 10;
+    manualNumbersText = '';
+    savingManualBet = false;
     generation: GenerationResponse | null = null;
     animalTrends: any = null;
     loadingAnimalTrends = false;
@@ -547,6 +556,29 @@ export class AppComponent implements OnInit {
         this.http.post<GenerationResponse>(this.api + '/predictions/generate', payload).subscribe({
             next: response => { response.numbers = this.sortByGroupAndMilhar(response.numbers); this.generation = response; this.generationWindowDays = response.windowDays; this.generating = false; },
             error: error => { this.error = this.errorMessage(error); this.generating = false; }
+        });
+    }
+
+    manualNumbersCount() {
+        const text = String(this.manualNumbersText || '').replace(/\[[^\]]*\]/g, ' ');
+        return Array.from(new Set(text.match(/(?<!\d)\d{4}(?!\d)/g) || [])).slice(0, 100).length;
+    }
+
+    manualBetAmount() { return Number(this.manualDezenaStake || 0) + Number(this.manualCentenaStake || 0) + Number(this.manualMilharStake || 0); }
+
+    manualPayout(stake: number, quote: number) {
+        const count = this.manualNumbersCount(); const range = Math.min(10, Math.max(1, Number(this.manualPrizeRange) || 1));
+        return count ? Math.round(Math.max(0, Number(stake) || 0) / count * quote / range * 100) / 100 : 0;
+    }
+
+    saveManualBet() {
+        if (!this.manualNumbersCount()) { this.error = 'Cole pelo menos uma milhar de quatro dígitos.'; return; }
+        this.savingManualBet = true; this.error = '';
+        const payload = { bank: this.manualBank, time: this.manualTime, targetDate: this.manualDate, numbers: this.manualNumbersText,
+            prizeRange: this.manualPrizeRange, dezenaStake: this.manualDezenaStake, centenaStake: this.manualCentenaStake, milharStake: this.manualMilharStake };
+        this.http.post<GenerationResponse>(this.api + '/predictions/manual', payload).subscribe({
+            next: response => { response.numbers = this.sortByGroupAndMilhar(response.numbers); this.generation = response; this.savingManualBet = false; this.message = 'Aposta manual registrada e pronta para conferência.'; },
+            error: error => { this.error = this.errorMessage(error); this.savingManualBet = false; }
         });
     }
 
