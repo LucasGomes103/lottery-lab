@@ -39,7 +39,9 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         var target = date ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
         if (target > DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3)))
             return BadRequest(new { message = "Não é possível sincronizar uma data futura." });
-        return Ok(await externalResults.Sync(target, cancellationToken));
+        var national = await externalResults.Sync(target, cancellationToken);
+        await externalResults.SyncLook(target, cancellationToken);
+        return Ok(new { national, look = externalResults.Status() });
     }
 
     [HttpPost("imports/history-sync")]

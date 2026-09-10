@@ -300,9 +300,9 @@ export class AppComponent implements OnInit {
             next: response => {
                 this.externalSyncResult = response;
                 this.syncingExternal = false;
-                this.message = response.inserted
-                    ? `${response.inserted} horários ausentes foram importados automaticamente.`
-                    : 'A base já está atualizada com todos os resultados disponíveis.';
+                this.message = response.national?.inserted
+                    ? `${response.national.inserted} horários ausentes foram importados na atualização das bancas.`
+                    : 'A atualização das bancas foi concluída; confira os status por banca.';
                 this.loadExternalSyncStatus();
                 this.loadHistory(1);
             },
