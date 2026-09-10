@@ -438,20 +438,18 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         foreach (var extraction in preview.Extractions)
         {
             var label = $"{extraction.Bank} {extraction.Date} {extraction.Time}";
-            if (!extraction.Bank.Trim().Equals("LT NACIONAL", StringComparison.OrdinalIgnoreCase))
-                errors.Add($"{label}: somente a banca LT NACIONAL é aceita.");
+            if (!IsSupportedBank(extraction.Bank)) errors.Add($"{label}: selecione Loteria Nacional ou Look Loterias.");
             if (extraction.Date is null) errors.Add($"{label}: data ausente.");
             if (!TimeOnly.TryParse(extraction.Time, out _)) errors.Add($"{label}: horário inválido.");
-            const int expectedResults = 7;
+            const int expectedResults = 10;
             if (extraction.Results.Count != expectedResults)
                 errors.Add($"{label}: são necessários exatamente {expectedResults} resultados.");
             if (extraction.Results.Select(x => x.Position).Distinct().Count() != extraction.Results.Count) errors.Add($"{label}: posições repetidas.");
             foreach (var result in extraction.Results)
             {
                 var digits = new string((result.Number ?? "").Where(char.IsDigit).ToArray());
-                var length = result.Position == 7 ? 3 : 4;
-                if (result.Position < 1 || result.Position > expectedResults || digits.Length != length)
-                    errors.Add($"{label}: resultado da posição {result.Position} deve possuir {length} dígitos.");
+                if (result.Position < 1 || result.Position > expectedResults || digits.Length != 4)
+                    errors.Add($"{label}: resultado da posição {result.Position} deve possuir 4 dígitos.");
             }
         }
         return errors;
@@ -459,19 +457,18 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
 
     private static ParsedResult NormalizeResult(ParsedResult result)
     {
-        var length = result.Position == 7 ? 3 : 4;
-        var number = new string(result.Number.Where(char.IsDigit).ToArray()).PadLeft(length, '0')[^length..];
+        var number = new string(result.Number.Where(char.IsDigit).ToArray()).PadLeft(4, '0')[^4..];
         var dezena = number[^2..];
         var centena = number[^3..];
         var value = int.Parse(dezena);
         var group = value == 0 ? 25 : (value + 3) / 4;
         string[] animals = ["AVESTRUZ", "AGUIA", "BURRO", "BORBOLETA", "CACHORRO", "CABRA", "CARNEIRO", "CAMELO", "COBRA", "COELHO", "CAVALO", "ELEFANTE", "GALO", "GATO", "JACARE", "LEAO", "MACACO", "PORCO", "PAVAO", "PERU", "TOURO", "TIGRE", "URSO", "VEADO", "VACA"];
-        return new ParsedResult(result.Position, number, result.Position == 7 ? null : number, centena, dezena, group, animals[group - 1]);
+        return new ParsedResult(result.Position, number, number, centena, dezena, group, animals[group - 1]);
     }
 
     private static string ExtractionKey(string bank, DateOnly date, string time) =>
         $"{bank.Trim()}|{date:yyyy-MM-dd}|{TimeOnly.Parse(time):HH:mm}";
 
-    private static bool IsNational(string? bank) =>
-        bank?.Trim().Equals("LT NACIONAL", StringComparison.OrdinalIgnoreCase) == true;
+    private static bool IsNational(string? bank) => IsSupportedBank(bank);
+    private static bool IsSupportedBank(string? bank) => bank?.Trim().ToUpperInvariant() is "LT NACIONAL" or "LOOK LOTERIAS";
 }

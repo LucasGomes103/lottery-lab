@@ -777,7 +777,7 @@ export class AppComponent implements OnInit {
 
     private prepareForReview(preview: ImportPreview) {
         for (const extraction of preview.extractions) {
-            for (let position = 1; position <= 7; position++) {
+            for (let position = 1; position <= 10; position++) {
                 if (!extraction.results.some(result => result.position === position)) extraction.results.push(this.emptyResult(position));
             }
             extraction.results.sort((left, right) => left.position - right.position);

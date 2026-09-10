@@ -54,7 +54,7 @@ public sealed class PredictionService(Db db)
               from results r join extractions e on e.id=r.extraction_id
               where e.bank=@bank and e.extraction_date>=@start
                 and (e.extraction_date<@date or (e.extraction_date=@date and e.extraction_time<@time::time))
-                and r.position between 1 and 5
+                and r.position between 1 and 10
               order by e.extraction_date,e.extraction_time,r.position",
             new { bank, start = start.Date, date = target.Date, time = targetTime.ToString("HH:mm") })).ToList();
 
@@ -118,7 +118,7 @@ public sealed class PredictionService(Db db)
             @"select e.id as ExtractionId,e.extraction_date as Date,r.number as Number
               from results r join extractions e on e.id=r.extraction_id
               where e.bank=@bank and e.extraction_time=@time::time and e.extraction_date<@targetDate
-                and e.extraction_date>=@startDate and r.position between 1 and 5
+                and e.extraction_date>=@startDate and r.position between 1 and 10
               order by e.extraction_date,r.position",
             new { bank, time = targetTime.ToString("HH:mm"), targetDate = targetDate.ToDateTime(TimeOnly.MinValue),
                 startDate = targetDate.AddDays(-windowDays).ToDateTime(TimeOnly.MinValue) })).ToList();
@@ -195,12 +195,12 @@ public sealed class PredictionService(Db db)
                      evaluated_at as EvaluatedAt,return_amount as ReturnAmount,profit_amount as ProfitAmount
               from prediction_evaluations where prediction_id=@id", new { id });
         var actual = evaluation is null ? [] : (await connection.QueryAsync<(int Position, string Number)>(
-            "select position,number from results where extraction_id=@id and position between 1 and 5 order by position",
+            "select position,number from results where extraction_id=@id and position between 1 and 10 order by position",
             new { id = evaluation.ExtractionId })).ToList();
         var dayResults = (await connection.QueryAsync<(TimeSpan Time, int Position, string Number)>(
             @"select e.extraction_time as Time,r.position as Position,r.number as Number
               from extractions e join results r on r.extraction_id=e.id
-              where e.bank=@bank and e.extraction_date=@date and r.position between 1 and 5
+              where e.bank=@bank and e.extraction_date=@date and r.position between 1 and 10
               order by e.extraction_time,r.position",
             new { bank = target.Bank, date = target.TargetDate.Date })).ToList();
         var beforeTarget = dayResults.Where(x => x.Time < target.TargetTime).ToList();
@@ -347,7 +347,7 @@ public sealed class PredictionService(Db db)
             new { bank, date = date.ToDateTime(TimeOnly.MinValue), time });
         if (extraction is null) return;
         var actual = (await connection.QueryAsync<(int Position, string Number)>(
-            "select position,number from results where extraction_id=@id and position between 1 and 5", new { id = extraction })).ToList();
+            "select position,number from results where extraction_id=@id and position between 1 and 10", new { id = extraction })).ToList();
         var predictions = await connection.QueryAsync<Guid>(
             @"select id from predictions where bank=@bank and target_date=@date and target_time=@time::time",
             new { bank, date = date.ToDateTime(TimeOnly.MinValue), time });
@@ -444,7 +444,7 @@ public sealed class PredictionService(Db db)
                       from results r join extractions e on e.id=r.extraction_id
                       where e.bank=@bank and e.extraction_date>=@start
                         and (e.extraction_date<@date or (@useSameDayResults and e.extraction_date=@date and e.extraction_time<@time::time))
-                        and r.position between 1 and 5
+                        and r.position between 1 and 10
                       order by e.extraction_date,e.extraction_time,r.position",
                     new { bank, start = target.AddDays(-windowDays).Date, date = target.Date,
                         time = targetTime.ToString("HH:mm"), useSameDayResults })).ToList();
@@ -459,7 +459,7 @@ public sealed class PredictionService(Db db)
                 var actual = (await connection.QueryAsync<string>(
                     @"select r.number from results r join extractions e on e.id=r.extraction_id
                       where e.bank=@bank and e.extraction_date=@date and e.extraction_time=@time::time
-                        and r.position between 1 and 5 order by r.position",
+                        and r.position between 1 and 10 order by r.position",
                     new { bank, date = target.Date, time = targetTime.ToString("HH:mm") })).ToList();
                 var milhar = selected.Sum(c => actual.Count(x => x == c.Milhar));
                 var centena = selected.Sum(c => actual.Count(x => x.EndsWith(c.Centena)));
@@ -486,7 +486,7 @@ public sealed class PredictionService(Db db)
         var rows = (await connection.QueryAsync<Row>(@"select e.id as ExtractionId,e.extraction_date as Date,
                     e.extraction_time as Time,r.position as Position,r.number as Number
               from results r join extractions e on e.id=r.extraction_id
-              where e.bank=@bank and r.position between 1 and 5
+              where e.bank=@bank and r.position between 1 and 10
               order by e.extraction_date,e.extraction_time,r.position", new { bank })).ToList();
         var extractions = rows.GroupBy(x => x.ExtractionId).Select(g => new
         {
@@ -628,7 +628,7 @@ public sealed class PredictionService(Db db)
         bool Add(Scored x, string type)
         {
             if (usedC.Contains(x.Centena) || (!restrictedToGroups && usedD.Contains(x.Dezena)) ||
-                (!restrictedToGroups && groups.GetValueOrDefault(x.Group) >= 2)) return false;
+                (!restrictedToGroups && groups.GetValueOrDefault(x.Group) >= Math.Max(2, (int)Math.Ceiling(quantity / 25d)))) return false;
             usedC.Add(x.Centena); usedD.Add(x.Dezena); groups[x.Group] = groups.GetValueOrDefault(x.Group) + 1;
             selected.Add((x, type)); return true;
         }
