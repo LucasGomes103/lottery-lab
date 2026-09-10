@@ -365,7 +365,9 @@ export class AppComponent implements OnInit {
     }
 
     private schedulesFor() {
-        return ['02:00', '08:00', '10:00', '12:00', '15:00', '17:00', '21:00', '23:00'];
+        return this.bank === 'LOOK LOTERIAS'
+            ? ['07:00', '09:00', '11:00', '14:00', '16:00', '18:00', '21:00', '23:00']
+            : ['02:00', '08:00', '10:00', '12:00', '15:00', '17:00', '21:00', '23:00'];
     }
 
     private minutes(value: string) {
@@ -571,10 +573,8 @@ export class AppComponent implements OnInit {
 
     onGenerationBankChange(value: string) {
         this.bank = value;
-        const look = value === 'LOOK LOTERIAS';
-        this.time = look ? '07:00' : '21:00';
+        this.setNextTarget();
         this.analysisTime = this.time;
-        this.applyRecommendedWindow();
     }
 
     applyRecommendedWindow() {

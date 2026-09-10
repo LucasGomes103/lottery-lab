@@ -13,7 +13,7 @@ public sealed class ResultFacilHistoryService(HttpClient http, Db db, Prediction
     private static readonly string[] Animals = ["AVESTRUZ", "AGUIA", "BURRO", "BORBOLETA", "CACHORRO", "CABRA", "CARNEIRO", "CAMELO", "COBRA", "COELHO", "CAVALO", "ELEFANTE", "GALO", "GATO", "JACARE", "LEAO", "MACACO", "PORCO", "PAVAO", "PERU", "TOURO", "TIGRE", "URSO", "VEADO", "VACA"];
 
     public async Task<object> Sync(string bank, DateOnly start, DateOnly end, CancellationToken cancellationToken,
-        Action<int, int, string>? reportProgress = null)
+        Action<int, int, string>? reportProgress = null, bool onlyMissingDates = false)
     {
         if (end < start) throw new ArgumentException("A data final deve ser igual ou posterior à inicial.");
         if (end.DayNumber - start.DayNumber > 3650) throw new ArgumentException("O intervalo máximo é de 10 anos.");
@@ -22,7 +22,15 @@ public sealed class ResultFacilHistoryService(HttpClient http, Db db, Prediction
         for (var date = start; date <= end; date = date.AddDays(1))
         {
             reportProgress?.Invoke(completedDays, totalDays, $"Consultando {bank} em {date:dd/MM/yyyy}");
-            try { imported += await SyncDate(bank, date, cancellationToken); }
+            try
+            {
+                if (onlyMissingDates && await HasExtractions(bank, date)) { skipped++; }
+                else
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(1250), cancellationToken);
+                    imported += await SyncDate(bank, date, cancellationToken);
+                }
+            }
             catch (Exception exception) { skipped++; errors.Add($"{date:dd/MM/yyyy}: {exception.Message}"); }
             completedDays++; reportProgress?.Invoke(completedDays, totalDays, $"Processado {date:dd/MM/yyyy}");
         }
@@ -33,8 +41,9 @@ public sealed class ResultFacilHistoryService(HttpClient http, Db db, Prediction
     {
         var slug = bank == "LOOK LOTERIAS" ? "resultados-look-loterias" : "resultados-loteria-nacional";
         var url = $"{slug}-do-dia-{date:yyyy-MM-dd}-1ao10";
-        var html = await http.GetStringAsync(url, cancellationToken);
+        var html = await FetchHtml(url, cancellationToken);
         var blocks = Block.Matches(html).Cast<Match>().Select(match => new { match.Groups["title"].Value, Encoded = match.Groups["id"].Value[..^1] + match.Groups["data"].Value[1..] }).ToList();
+        if (blocks.Count == 0) throw new InvalidDataException("A página não trouxe tabelas de resultado; a data será tentada novamente.");
         await using var connection = db.Open(); var count = 0;
         foreach (var block in blocks)
         {
@@ -61,6 +70,34 @@ public sealed class ResultFacilHistoryService(HttpClient http, Db db, Prediction
             }
             await tx.CommitAsync(cancellationToken); await predictions.EvaluatePending(bank, date, time); count++;
         }
+        if (count == 0) throw new InvalidDataException("Nenhum horário com 10 prêmios foi encontrado; a data será tentada novamente.");
         return count;
+    }
+
+    private async Task<bool> HasExtractions(string bank, DateOnly date)
+    {
+        await using var connection = db.Open();
+        return await connection.ExecuteScalarAsync<bool>("select exists(select 1 from extractions where bank=@bank and extraction_date=@date)",
+            new { bank, date = date.ToDateTime(TimeOnly.MinValue) });
+    }
+
+    private async Task<string> FetchHtml(string url, CancellationToken cancellationToken)
+    {
+        Exception? last = null;
+        for (var attempt = 1; attempt <= 4; attempt++)
+        {
+            try
+            {
+                using var response = await http.GetAsync(url, cancellationToken);
+                if (response.IsSuccessStatusCode) return await response.Content.ReadAsStringAsync(cancellationToken);
+                last = new HttpRequestException($"A fonte respondeu {(int)response.StatusCode} ({response.ReasonPhrase}).");
+            }
+            catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+            {
+                last = exception;
+            }
+            if (attempt < 4) await Task.Delay(TimeSpan.FromSeconds(attempt * 3), cancellationToken);
+        }
+        throw new InvalidDataException($"Não foi possível consultar a fonte após 4 tentativas: {last?.Message}");
     }
 }

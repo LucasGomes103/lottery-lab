@@ -34,6 +34,32 @@ public sealed class ExternalResultsService(HttpClient http, Db db, PredictionSer
         state.LastAttempt = DateTimeOffset.UtcNow;
         try
         {
+            await using var connection = db.Open();
+            var before = (await connection.QueryAsync<TimeSpan>("select extraction_time from extractions where bank=@Bank and extraction_date=@Date",
+                new { Bank, Date = date.ToDateTime(TimeOnly.MinValue) })).Select(x => $"{x.Hours:00}:{x.Minutes:00}").ToHashSet();
+            await history.Sync(Bank, date, date, cancellationToken);
+            var after = (await connection.QueryAsync<TimeSpan>("select extraction_time from extractions where bank=@Bank and extraction_date=@Date",
+                new { Bank, Date = date.ToDateTime(TimeOnly.MinValue) })).Select(x => $"{x.Hours:00}:{x.Minutes:00}").ToHashSet();
+            var insertedTimes = after.Except(before).Order().ToList();
+            var unavailable = Schedules.Where(x => !after.Contains(x)).ToList();
+            state.LastSuccess = DateTimeOffset.UtcNow; state.LastError = null; state.LastInserted = insertedTimes.Count;
+            return new ExternalSyncResult(date, insertedTimes.Count, before.Count, insertedTimes, unavailable,
+                "https://www.resultadofacil.com.br/", DateTimeOffset.UtcNow);
+        }
+        catch (Exception exception)
+        {
+            state.LastError = exception.Message;
+            logger.LogError(exception, "Falha ao sincronizar resultados automáticos da Nacional de {Date}", date);
+            throw;
+        }
+    }
+
+    // Mantido temporariamente como referência da fonte legada; a sincronização ativa usa 1º–10º.
+    private async Task<ExternalSyncResult> SyncLegacy(DateOnly date, CancellationToken cancellationToken = default)
+    {
+        state.LastAttempt = DateTimeOffset.UtcNow;
+        try
+        {
             using var content = new FormUrlEncodedContent(new Dictionary<string, string>
             {
                 ["dtSorteio"] = date.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture), ["horario"] = ""
