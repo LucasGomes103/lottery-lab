@@ -364,7 +364,16 @@ public sealed class PredictionService(Db db)
                    coalesce(sum(pe.profit_amount),0)::numeric as profit_amount
             from predictions p join prediction_evaluations pe on pe.prediction_id=p.id {evaluatedFilter}
             group by p.target_date order by p.target_date desc limit 30", args);
-        return new { totals, byTime, byDate };
+        var byPrizeRange = await connection.QueryAsync($@"
+            select p.prize_range, count(*)::int as evaluated_predictions,
+                   coalesce(sum(p.bet_amount),0)::numeric as bet_amount,
+                   coalesce(sum(pe.return_amount),0)::numeric as return_amount,
+                   coalesce(sum(pe.profit_amount),0)::numeric as profit_amount,
+                   case when coalesce(sum(p.bet_amount),0)=0 then 0
+                     else round(100*sum(pe.profit_amount)/sum(p.bet_amount),2) end as roi_percent
+            from predictions p join prediction_evaluations pe on pe.prediction_id=p.id {evaluatedFilter}
+            group by p.prize_range order by p.prize_range", args);
+        return new { totals, byTime, byDate, byPrizeRange };
     }
 
     public async Task EvaluatePending(string bank, DateOnly date, string time)
