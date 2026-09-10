@@ -27,7 +27,7 @@ public sealed class ResultFacilHistoryService(HttpClient http, Db db, Prediction
             reportProgress?.Invoke(completedDays, totalDays, $"Consultando {bank} em {date:dd/MM/yyyy}");
             try
             {
-                if (onlyMissingDates && await HasExtractions(bank, date)) { skipped++; }
+                if (onlyMissingDates && await IsDateComplete(bank, date)) { skipped++; }
                 else
                 {
                     // A fonte aplica limite de requisições; 3,5 s evita bloqueio durante cargas longas.
@@ -78,11 +78,18 @@ public sealed class ResultFacilHistoryService(HttpClient http, Db db, Prediction
         return count;
     }
 
-    private async Task<bool> HasExtractions(string bank, DateOnly date)
+    private async Task<bool> IsDateComplete(string bank, DateOnly date)
     {
+        var schedules = bank == "LOOK LOTERIAS"
+            ? new[] { "07:00", "09:00", "11:00", "14:00", "16:00", "18:00", "21:00", "23:00" }
+            : new[] { "02:00", "08:00", "10:00", "12:00", "15:00", "17:00", "21:00", "23:00" };
         await using var connection = db.Open();
-        return await connection.ExecuteScalarAsync<bool>("select exists(select 1 from extractions where bank=@bank and extraction_date=@date)",
-            new { bank, date = date.ToDateTime(TimeOnly.MinValue) });
+        var completeSchedules = await connection.ExecuteScalarAsync<int>("""
+            select count(*)::int from extractions e
+            where e.bank=@bank and e.extraction_date=@date and to_char(e.extraction_time,'HH24:MI')=any(@schedules)
+              and (select count(*) from results r where r.extraction_id=e.id) = 10
+            """, new { bank, date = date.ToDateTime(TimeOnly.MinValue), schedules });
+        return completeSchedules == schedules.Length;
     }
 
     private async Task<string> FetchHtml(string url, CancellationToken cancellationToken)
