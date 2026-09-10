@@ -545,7 +545,7 @@ export class AppComponent implements OnInit {
             dezenaStake: this.dezenaStake, centenaStake: this.centenaStake, milharStake: this.milharStake,
             groups: Array.from(this.selectedAnimalGroups) };
         this.http.post<GenerationResponse>(this.api + '/predictions/generate', payload).subscribe({
-            next: response => { this.generation = response; this.generationWindowDays = response.windowDays; this.generating = false; },
+            next: response => { response.numbers = this.sortByGroupAndMilhar(response.numbers); this.generation = response; this.generationWindowDays = response.windowDays; this.generating = false; },
             error: error => { this.error = this.errorMessage(error); this.generating = false; }
         });
     }
@@ -704,7 +704,7 @@ export class AppComponent implements OnInit {
         this.loadingPrediction = true;
         this.selectedPrediction = null;
         this.http.get<any>(this.api + `/predictions/${id}`).subscribe({
-            next: response => { this.selectedPrediction = response; this.loadingPrediction = false; },
+            next: response => { response.candidates = this.sortByGroupAndMilhar(response.candidates); this.selectedPrediction = response; this.loadingPrediction = false; },
             error: error => { this.error = this.errorMessage(error); this.loadingPrediction = false; }
         });
     }
@@ -713,6 +713,7 @@ export class AppComponent implements OnInit {
         this.loadingPrediction = true;
         this.http.post<any>(this.api + `/predictions/${id}/evaluate`, {}).subscribe({
             next: response => {
+                response.candidates = this.sortByGroupAndMilhar(response.candidates);
                 this.selectedPrediction = response;
                 this.loadingPrediction = false;
                 this.message = response.evaluation ? 'Previsão conferida com o resultado existente na base.' : 'O resultado desse horário ainda não foi importado.';
@@ -726,6 +727,11 @@ export class AppComponent implements OnInit {
 
     predictionStatus(item: any) {
         return item.status === 'EVALUATED' ? 'Conferida' : 'Aguardando resultado';
+    }
+
+    private sortByGroupAndMilhar<T extends { group: number; milhar: string }>(items: T[] | null | undefined) {
+        return [...(items || [])].sort((left, right) => Number(left.group) - Number(right.group)
+            || String(left.milhar).localeCompare(String(right.milhar), 'pt-BR', { numeric: true }));
     }
 
     matchLabel(matches: Array<{ time?: string; position: number; number: string }>) {
