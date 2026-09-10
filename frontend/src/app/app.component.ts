@@ -328,7 +328,7 @@ export class AppComponent implements OnInit {
         const poll = () => this.http.get<any>(this.api + `/imports/history-sync/jobs/${id}`).subscribe({
             next: job => {
                 this.historySyncJob = job;
-                if (job.status === 'COMPLETED') { this.historySyncResult = job.result; this.syncingHistory = false; this.stopHistorySyncPoll(); this.loadHistory(1); }
+                if (job.status === 'COMPLETED' || job.status === 'COMPLETED_WITH_ERRORS') { this.historySyncResult = job.result; this.syncingHistory = false; this.stopHistorySyncPoll(); this.loadHistory(1); }
                 if (job.status === 'FAILED') { this.error = job.error || 'A carga histórica falhou.'; this.syncingHistory = false; this.stopHistorySyncPoll(); }
             },
             error: error => { this.error = this.errorMessage(error); this.syncingHistory = false; this.stopHistorySyncPoll(); }

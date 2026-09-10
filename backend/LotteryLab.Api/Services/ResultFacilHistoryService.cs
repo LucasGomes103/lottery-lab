@@ -6,13 +6,16 @@ using LotteryLab.Api.Data;
 
 namespace LotteryLab.Api.Services;
 
+public sealed record HistorySyncResult(string Bank, DateOnly Start, DateOnly End, int DaysProcessed,
+    int ImportedExtractions, int SkippedDays, List<string> Errors, string Source);
+
 public sealed class ResultFacilHistoryService(HttpClient http, Db db, PredictionService predictions)
 {
     private static readonly Regex Block = new(@"<h3[^>]*>(?<title>.*?)</h3>.*?<table[^>]*id=""(?<id>[^""]+)""[^>]*data-extends=""(?<data>[^""]+)""", RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex Number = new(@"""(?<position>\d+)_(?<number>\d{4})_\d{2}""", RegexOptions.Compiled);
     private static readonly string[] Animals = ["AVESTRUZ", "AGUIA", "BURRO", "BORBOLETA", "CACHORRO", "CABRA", "CARNEIRO", "CAMELO", "COBRA", "COELHO", "CAVALO", "ELEFANTE", "GALO", "GATO", "JACARE", "LEAO", "MACACO", "PORCO", "PAVAO", "PERU", "TOURO", "TIGRE", "URSO", "VEADO", "VACA"];
 
-    public async Task<object> Sync(string bank, DateOnly start, DateOnly end, CancellationToken cancellationToken,
+    public async Task<HistorySyncResult> Sync(string bank, DateOnly start, DateOnly end, CancellationToken cancellationToken,
         Action<int, int, string>? reportProgress = null, bool onlyMissingDates = false)
     {
         if (end < start) throw new ArgumentException("A data final deve ser igual ou posterior à inicial.");
@@ -35,7 +38,7 @@ public sealed class ResultFacilHistoryService(HttpClient http, Db db, Prediction
             catch (Exception exception) { skipped++; errors.Add($"{date:dd/MM/yyyy}: {exception.Message}"); }
             completedDays++; reportProgress?.Invoke(completedDays, totalDays, $"Processado {date:dd/MM/yyyy}");
         }
-        return new { bank, start, end, daysProcessed = completedDays, importedExtractions = imported, skippedDays = skipped, errors, source = "https://www.resultadofacil.com.br/" };
+        return new HistorySyncResult(bank, start, end, completedDays, imported, skipped, errors, "https://www.resultadofacil.com.br/");
     }
 
     private async Task<int> SyncDate(string bank, DateOnly date, CancellationToken cancellationToken)

@@ -136,7 +136,7 @@ public sealed class ExternalResultsService(HttpClient http, Db db, PredictionSer
         try
         {
             var result = await history.Sync("LOOK LOTERIAS", date, date, cancellationToken);
-            var inserted = (int)(result.GetType().GetProperty("importedExtractions")?.GetValue(result) ?? 0);
+            var inserted = result.ImportedExtractions;
             state.LookLastSuccess = DateTimeOffset.UtcNow; state.LookLastError = null; state.LookLastInserted = inserted;
         }
         catch (Exception exception)

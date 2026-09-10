@@ -27,11 +27,13 @@ public sealed class HistorySyncJobService(IServiceScopeFactory scopes)
             {
                 await using var scope = scopes.CreateAsyncScope();
                 var history = scope.ServiceProvider.GetRequiredService<ResultFacilHistoryService>();
-                job.Result = await history.Sync(bank, start, end, default, (completed, total, step) =>
+                var result = await history.Sync(bank, start, end, default, (completed, total, step) =>
                 {
                     job.Completed = completed; job.CurrentStep = step;
                 });
-                job.Completed = job.Total; job.CurrentStep = "Carga concluída"; job.Status = "COMPLETED";
+                job.Result = result; job.Completed = job.Total;
+                job.CurrentStep = result.Errors.Count == 0 ? "Carga concluída" : $"Carga concluída com {result.Errors.Count} erros";
+                job.Status = result.Errors.Count == 0 ? "COMPLETED" : "COMPLETED_WITH_ERRORS";
             }
             catch (Exception exception)
             {
