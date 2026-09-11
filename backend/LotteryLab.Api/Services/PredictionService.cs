@@ -475,7 +475,22 @@ public sealed class PredictionService(Db db)
                      else round(100*sum(pe.profit_amount)/sum(p.bet_amount),2) end as roi_percent
             from predictions p join prediction_evaluations pe on pe.prediction_id=p.id {evaluatedFilter}
             group by p.prize_range order by p.prize_range", args);
-        return new { totals, byTime, byDate, byPrizeRange };
+        var byPrizePosition = await connection.QueryAsync($@"
+            with filtered_predictions as (
+                select p.* from predictions p {filter}
+            )
+            select positions.position,
+                   count(distinct fp.id) filter (where pe.prediction_id is not null and positions.position <= fp.prize_range)::int as evaluated_predictions,
+                   coalesce(sum(case when positions.position <= fp.prize_range and pc.milhar = r.number then 1 else 0 end), 0)::int as milhar_hits,
+                   coalesce(sum(case when positions.position <= fp.prize_range and pc.centena = right(r.number, 3) then 1 else 0 end), 0)::int as centena_hits,
+                   coalesce(sum(case when positions.position <= fp.prize_range and pc.dezena = right(r.number, 2) then 1 else 0 end), 0)::int as dezena_hits
+            from generate_series(1, 10) as positions(position)
+            left join filtered_predictions fp on true
+            left join prediction_evaluations pe on pe.prediction_id = fp.id
+            left join results r on r.extraction_id = pe.extraction_id and r.position = positions.position
+            left join prediction_candidates pc on pc.prediction_id = fp.id
+            group by positions.position order by positions.position", args);
+        return new { totals, byTime, byDate, byPrizeRange, byPrizePosition };
     }
 
     public async Task EvaluatePending(string bank, DateOnly date, string time)
