@@ -436,7 +436,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     [Authorize(Policy = Permissions.AnalysisUse)]
     public async Task<IActionResult> PredictionDecisionBattery(string bank = "LT NACIONAL", int quantity = 8,
         decimal betAmount = 30m, decimal dezenaPayout = 8.57m, decimal centenaPayout = 57.14m,
-        decimal milharPayout = 296.30m, int prizeRange = 5, int maxEvaluations = 500)
+        decimal milharPayout = 296.30m, int prizeRange = 5, int maxEvaluations = 3000)
     {
         if (!IsNational(bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
         return Ok(await predictions.DecisionBattery(bank.Trim(), quantity, Math.Clamp(betAmount, 0m, 1_000_000m),
@@ -448,7 +448,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     [Authorize(Policy = Permissions.AnalysisUse)]
     public IActionResult StartPredictionDecisionBattery(string bank = "LT NACIONAL", int quantity = 8,
         decimal betAmount = 30m, decimal dezenaPayout = 8.57m, decimal centenaPayout = 57.14m,
-        decimal milharPayout = 296.30m, int prizeRange = 5, int maxEvaluations = 500)
+        decimal milharPayout = 296.30m, int prizeRange = 5, int maxEvaluations = 3000)
     {
         if (!IsNational(bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
         return Accepted(decisionBatteryJobs.Start(bank.Trim(), Math.Clamp(quantity, 1, 100), Math.Clamp(betAmount, 0m, 1_000_000m),

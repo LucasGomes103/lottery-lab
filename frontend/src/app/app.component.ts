@@ -24,6 +24,7 @@ export class AppComponent implements OnInit {
     decisionBattery: any = null;
     loadingDecisionBattery = false;
     decisionBatteryJob: any = null;
+    decisionBatteryMaxEvaluations = 3000;
     private decisionBatteryPoll: ReturnType<typeof setInterval> | null = null;
     ai = '';
     message = '';
@@ -542,7 +543,7 @@ export class AppComponent implements OnInit {
         const params = new URLSearchParams({ bank: this.bank, quantity: String(this.generationQuantity),
             betAmount: String(this.betAmount), dezenaPayout: String(this.dezenaPayout),
             centenaPayout: String(this.centenaPayout), milharPayout: String(this.milharPayout),
-            prizeRange: String(this.prizeRange) });
+            prizeRange: String(this.prizeRange), maxEvaluations: String(Math.min(3000, Math.max(100, Number(this.decisionBatteryMaxEvaluations) || 3000))) });
         this.http.post<any>(this.api + `/predictions/decision-battery/jobs?${params}`, {}).subscribe({
             next: job => { this.decisionBatteryJob = job; this.pollDecisionBattery(job.id); },
             error: error => { this.error = this.errorMessage(error); this.loadingDecisionBattery = false; }
