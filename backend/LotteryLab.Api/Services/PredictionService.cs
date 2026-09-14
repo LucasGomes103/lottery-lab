@@ -29,14 +29,19 @@ public sealed class PredictionService(Db db)
     private sealed record PredictionTarget(string Bank, DateTime TargetDate, TimeSpan TargetTime);
     private sealed record PredictionFinancial(decimal BetAmount, decimal DezenaPayout,
         decimal CentenaPayout, decimal MilharPayout, int PrizeRange);
+    private sealed record DailyWindowChoice(int WindowDays, int EvaluatedDays, int MilharHits, int CentenaHits,
+        int DezenaHits, string Methodology);
 
-    public async Task<PredictionResponse> GenerateAndSave(PredictionRequest request)
+    public Task<PredictionResponse> GenerateAndSave(PredictionRequest request) => GenerateAndSaveInternal(request);
+
+    private async Task<PredictionResponse> GenerateAndSaveInternal(PredictionRequest request, int? resolvedWindowDays = null,
+        DailyWindowChoice? dailyWindow = null)
     {
         var bank = request.Bank.Trim();
         var date = request.TargetDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3));
         if (!TimeOnly.TryParse(request.Time, out var targetTime)) throw new ArgumentException("Horário inválido.");
         var requestedWindowDays = Math.Clamp(request.WindowDays, 7, 3650);
-        var windowDays = request.UseRecommendedWindow ? RecommendedWindow(targetTime) : requestedWindowDays;
+        var windowDays = resolvedWindowDays ?? (request.UseRecommendedWindow ? RecommendedWindow(targetTime) : requestedWindowDays);
         var quantity = Math.Clamp(request.Quantity, 1, 100);
         var prizeRange = Math.Clamp(request.PrizeRange, 1, 10);
         var dezenaStake = Math.Clamp(request.DezenaStake, 0m, 1_000_000m);
@@ -84,6 +89,7 @@ public sealed class PredictionService(Db db)
             restrictedGroups = requestedGroups,
             requestedWindowDays,
             usedRecommendedWindow = request.UseRecommendedWindow,
+            dailyWindow,
             prizeRange,
             stakes = new { dezena = dezenaStake, centena = centenaStake, milhar = milharStake },
             stakePerNumber = new { dezena = dezenaStake / quantity, centena = centenaStake / quantity, milhar = milharStake / quantity }
@@ -125,17 +131,69 @@ public sealed class PredictionService(Db db)
 
     public async Task<BankDayPredictionResponse> GenerateForBankDay(PredictionRequest request)
     {
-        var source = await GenerateAndSave(request);
-        var schedules = source.Bank.Equals("LOOK LOTERIAS", StringComparison.OrdinalIgnoreCase)
+        var bank = request.Bank.Trim();
+        var schedules = bank.Equals("LOOK LOTERIAS", StringComparison.OrdinalIgnoreCase)
             ? new[] { "07:00", "09:00", "11:00", "14:00", "16:00", "18:00", "21:00", "23:00" }
             : new[] { "02:00", "08:00", "10:00", "12:00", "15:00", "17:00", "21:00", "23:00" };
+        var dailyRequest = request with { Bank = bank, Time = schedules[0] };
+        DailyWindowChoice? dailyWindow = null;
+        if (request.UseRecommendedWindow)
+            dailyWindow = await RecommendDailyWindow(bank, request.TargetDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3)),
+                request.Quantity, TimeOnly.Parse(schedules[0]));
+        var source = await GenerateAndSaveInternal(dailyRequest, dailyWindow?.WindowDays, dailyWindow);
         var predictions = new List<PredictionResponse> { source };
         foreach (var targetTime in schedules.Where(x => x != source.Time))
             predictions.Add(await SaveCopiedPrediction(source, targetTime));
 
         return new BankDayPredictionResponse(source, predictions.OrderBy(x => x.Time).ToList(),
             predictions.Sum(x => x.BetAmount),
-            $"A mesma lista de {source.Quantity} números foi registrada nos {predictions.Count} horários da banca. Cada horário é uma aposta e conferência independente.");
+            $"A mesma lista de {source.Quantity} números foi registrada nos {predictions.Count} horários da banca. " +
+            (dailyWindow is null
+                ? "Foi usada a janela manual informada."
+                : $"A janela diária automática escolhida foi de {dailyWindow.WindowDays} dias, validada em {dailyWindow.EvaluatedDays} dias anteriores.") +
+            " Cada horário é uma aposta e conferência independente.");
+    }
+
+    private async Task<DailyWindowChoice> RecommendDailyWindow(string bank, DateOnly targetDate, int quantity, TimeOnly baseTime)
+    {
+        quantity = Math.Clamp(quantity, 1, 100);
+        var candidateWindows = new[] { 30, 60, 90, 120, 180, 240 };
+        await using var connection = db.Open();
+        var rows = (await connection.QueryAsync<Row>(
+            @"select e.id as ExtractionId,e.extraction_date as Date,e.extraction_time as Time,
+                     r.position as Position,r.number as Number
+              from results r join extractions e on e.id=r.extraction_id
+              where e.bank=@bank and e.extraction_date<@targetDate and r.position between 1 and 10
+              order by e.extraction_date,e.extraction_time,r.position",
+            new { bank, targetDate = targetDate.ToDateTime(TimeOnly.MinValue) })).ToList();
+        var dates = rows.GroupBy(x => x.Date.Date)
+            .Where(day => day.Select(x => x.ExtractionId).Distinct().Count() >= 4)
+            .Select(day => DateOnly.FromDateTime(day.Key)).OrderDescending().Take(60).Order().ToList();
+        if (dates.Count == 0)
+            return new DailyWindowChoice(180, 0, 0, 0, 0, "Base insuficiente; aplicada janela diária padrão de 180 dias.");
+
+        var comparisons = new List<DailyWindowChoice>();
+        foreach (var window in candidateWindows)
+        {
+            var milharHits = 0; var centenaHits = 0; var dezenaHits = 0;
+            foreach (var date in dates)
+            {
+                var historyStart = date.AddDays(-window).ToDateTime(TimeOnly.MinValue);
+                var historyEnd = date.ToDateTime(TimeOnly.MinValue);
+                var history = rows.Where(x => x.Date < historyEnd && x.Date >= historyStart).ToList();
+                if (history.Count == 0) continue;
+                var seed = StableSeed($"daily-window:{bank}:{date:yyyy-MM-dd}:{window}:{quantity}");
+                var picks = Select(Score(history, baseTime, [], true), quantity, seed, false);
+                var actual = rows.Where(x => x.Date.Date == historyEnd).Select(x => x.Number.PadLeft(4, '0')[^4..]).ToList();
+                milharHits += picks.Sum(pick => actual.Count(number => number == pick.Milhar));
+                centenaHits += picks.Sum(pick => actual.Count(number => number.EndsWith(pick.Centena)));
+                dezenaHits += picks.Sum(pick => actual.Count(number => number.EndsWith(pick.Dezena)));
+            }
+            comparisons.Add(new DailyWindowChoice(window, dates.Count, milharHits, centenaHits, dezenaHits,
+                "Walk-forward diário: uma única lista é gerada antes do primeiro horário e confrontada com todos os resultados disponíveis do dia."));
+        }
+        return comparisons.OrderByDescending(x => x.MilharHits).ThenByDescending(x => x.CentenaHits)
+            .ThenByDescending(x => x.DezenaHits).ThenBy(x => Math.Abs(x.WindowDays - 180)).First();
     }
 
     private async Task<PredictionResponse> SaveCopiedPrediction(PredictionResponse source, string targetTime)
