@@ -188,7 +188,13 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
               where e.bank=@bank and lpad(r.number,4,'0')=@milhar
               group by r.position order by r.position",
             new { bank = bank.Trim(), milhar = normalized });
-        return Ok(new { bank = bank.Trim(), milhar = normalized, total = occurrences.Count, occurrences, byPosition });
+        var centena = normalized[1..];
+        var centenaTotal = await connection.ExecuteScalarAsync<int>(
+            @"select count(*) from results r join extractions e on e.id=r.extraction_id
+              where e.bank=@bank and right(lpad(r.number,4,'0'),3)=@centena",
+            new { bank = bank.Trim(), centena });
+        return Ok(new { bank = bank.Trim(), milhar = normalized, total = occurrences.Count, occurrences, byPosition,
+            centena, centenaTotal });
     }
 
     [HttpGet("history/{id:long}")]
