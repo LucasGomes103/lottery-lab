@@ -49,7 +49,7 @@ export class AppComponent implements OnInit {
     editingIds: number[] = [];
     selectedHistoryIds = new Set<number>();
     history: HistoryItem[] = [];
-    activeSection: 'import' | 'history' | 'analysis' | 'predictions' | 'dashboard' | 'users' | 'account' = 'import';
+    activeSection: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'dashboard' | 'users' | 'account' = 'import';
     historyBank = 'LT NACIONAL';
     historyStartDate = '';
     historyEndDate = '';
@@ -58,6 +58,10 @@ export class AppComponent implements OnInit {
     historyPageSize = 20;
     historyTotal = 0;
     historyTotalPages = 1;
+    milharSearchBank = 'LT NACIONAL';
+    milharSearchValue = '';
+    milharSearchResult: any = null;
+    searchingMilhar = false;
     bank = 'LT NACIONAL';
     time = '21:00';
     analysisTime = '21:00';
@@ -178,7 +182,7 @@ export class AppComponent implements OnInit {
 
     private finishLogout() { localStorage.removeItem('lotteryLabToken'); this.currentUser = null; }
 
-    navigate(section: 'import' | 'history' | 'analysis' | 'predictions' | 'dashboard' | 'users' | 'account') {
+    navigate(section: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'dashboard' | 'users' | 'account') {
         this.activeSection = section;
         this.error = '';
         this.message = '';
@@ -186,6 +190,23 @@ export class AppComponent implements OnInit {
         if (section === 'predictions') this.loadPredictionHistory(this.predictionPage);
         if (section === 'dashboard') this.loadDashboard();
         if (section === 'users') this.loadUsers();
+    }
+
+    searchMilhar() {
+        const milhar = String(this.milharSearchValue || '').replace(/\D/g, '');
+        if (milhar.length !== 4) { this.error = 'Informe uma milhar com exatamente quatro dígitos.'; return; }
+        this.searchingMilhar = true;
+        this.error = '';
+        this.milharSearchResult = null;
+        const params = new URLSearchParams({ bank: this.milharSearchBank, milhar });
+        this.http.get<any>(this.api + `/history/search-milhar?${params}`).subscribe({
+            next: response => { this.milharSearchValue = response.milhar; this.milharSearchResult = response; this.searchingMilhar = false; },
+            error: error => { this.error = this.errorMessage(error); this.searchingMilhar = false; }
+        });
+    }
+
+    milharPositionsLabel(items: Array<{ position: number }> | null | undefined) {
+        return (items || []).map(item => `${item.position}º`).join(', ') || 'Nenhuma';
     }
 
     loadUsers() {

@@ -166,6 +166,31 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         return Ok(new { items, total, page, pageSize, totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize)) });
     }
 
+    [HttpGet("history/search-milhar")]
+    [Authorize(Policy = Permissions.HistoryRead)]
+    public async Task<IActionResult> SearchMilhar(string bank, string milhar)
+    {
+        var normalized = new string((milhar ?? string.Empty).Where(char.IsDigit).ToArray());
+        if (normalized.Length != 4) return BadRequest(new { message = "Informe uma milhar com exatamente quatro dígitos." });
+        if (!IsNational(bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
+
+        await using var connection = db.Open();
+        var occurrences = (await connection.QueryAsync(
+            @"select e.bank,e.extraction_date,e.extraction_time,r.position,lpad(r.number,4,'0') as number,
+                     r.group_no,r.animal
+              from results r join extractions e on e.id=r.extraction_id
+              where e.bank=@bank and lpad(r.number,4,'0')=@milhar
+              order by e.extraction_date desc,e.extraction_time desc,r.position",
+            new { bank = bank.Trim(), milhar = normalized })).ToList();
+        var byPosition = await connection.QueryAsync(
+            @"select r.position,count(*)::int as occurrences
+              from results r join extractions e on e.id=r.extraction_id
+              where e.bank=@bank and lpad(r.number,4,'0')=@milhar
+              group by r.position order by r.position",
+            new { bank = bank.Trim(), milhar = normalized });
+        return Ok(new { bank = bank.Trim(), milhar = normalized, total = occurrences.Count, occurrences, byPosition });
+    }
+
     [HttpGet("history/{id:long}")]
     [Authorize(Policy = Permissions.HistoryRead)]
     public async Task<IActionResult> HistoryDetail(long id)
