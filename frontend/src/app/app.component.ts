@@ -569,7 +569,14 @@ export class AppComponent implements OnInit {
         this.decisionBatteryPoll = null;
     }
 
+    get maximumGenerationQuantity() { return (this.selectedAnimalGroups.size || 25) * 400; }
+
     generateNumbers() {
+        if (!Number.isInteger(this.generationQuantity) || this.generationQuantity < 1 || this.generationQuantity > this.maximumGenerationQuantity) {
+            this.error = `Informe uma quantidade inteira entre 1 e ${this.maximumGenerationQuantity} para os animais selecionados.`;
+            return;
+        }
+        this.recalculatePayouts();
         this.generating = true;
         this.error = '';
         const payload = { bank: this.bank, time: this.time, targetDate: this.generationDate,
@@ -652,7 +659,7 @@ export class AppComponent implements OnInit {
 
     recalculatePayouts() {
         const range = Math.min(10, Math.max(1, Number(this.prizeRange) || 1));
-        const quantity = Math.min(100, Math.max(1, Number(this.generationQuantity) || 1));
+        const quantity = Math.max(1, Number(this.generationQuantity) || 1);
         this.prizeRange = range;
         this.dezenaStake = Math.max(0, Number(this.dezenaStake) || 0);
         this.centenaStake = Math.max(0, Number(this.centenaStake) || 0);
@@ -666,7 +673,7 @@ export class AppComponent implements OnInit {
     bankDayBetAmount() { return this.betAmount * this.schedulesFor().length; }
 
     stakePerNumber(stake: number) {
-        const quantity = Math.min(100, Math.max(1, Number(this.generationQuantity) || 1));
+        const quantity = Math.max(1, Number(this.generationQuantity) || 1);
         return Math.max(0, Number(stake) || 0) / quantity;
     }
 

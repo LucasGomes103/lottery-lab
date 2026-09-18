@@ -42,7 +42,11 @@ public sealed class PredictionService(Db db)
         if (!TimeOnly.TryParse(request.Time, out var targetTime)) throw new ArgumentException("Horário inválido.");
         var requestedWindowDays = Math.Clamp(request.WindowDays, 7, 3650);
         var windowDays = resolvedWindowDays ?? (request.UseRecommendedWindow ? RecommendedWindow(targetTime) : requestedWindowDays);
-        var quantity = Math.Clamp(request.Quantity, 1, 100);
+        var requestedGroups = (request.Groups ?? []).Where(x => x is >= 1 and <= 25).Distinct().Order().ToArray();
+        var maximumQuantity = requestedGroups.Length == 0 ? 10_000 : requestedGroups.Length * 400;
+        if (request.Quantity < 1 || request.Quantity > maximumQuantity)
+            throw new ArgumentException($"Informe uma quantidade entre 1 e {maximumQuantity} para os animais selecionados.");
+        var quantity = request.Quantity;
         var prizeRange = Math.Clamp(request.PrizeRange, 1, 10);
         var dezenaStake = Math.Clamp(request.DezenaStake, 0m, 1_000_000m);
         var centenaStake = Math.Clamp(request.CentenaStake, 0m, 1_000_000m);
@@ -52,7 +56,6 @@ public sealed class PredictionService(Db db)
         var dezenaPayout = Math.Round(dezenaStake / quantity * 90m / prizeRange, 2);
         var centenaPayout = Math.Round(centenaStake / quantity * 900m / prizeRange, 2);
         var milharPayout = Math.Round(milharStake / quantity * 9000m / prizeRange, 2);
-        var requestedGroups = (request.Groups ?? []).Where(x => x is >= 1 and <= 25).Distinct().Order().ToArray();
         var groupKey = requestedGroups.Length == 0 ? "ALL" : string.Join('-', requestedGroups);
         var seed = StableSeed($"{Algorithm}:{Version}:{bank}:{date:yyyy-MM-dd}:{targetTime:HH:mm}:{windowDays}:{quantity}:{groupKey}");
 
@@ -76,6 +79,7 @@ public sealed class PredictionService(Db db)
 
         var ranked = Score(rows, targetTime, priorAppearances);
         if (requestedGroups.Length > 0) ranked = ranked.Where(x => requestedGroups.Contains(x.Group)).ToList();
+        if (ranked.Count < quantity) throw new ArgumentException("Histórico insuficiente para gerar a quantidade solicitada.");
         var selected = Select(ranked, quantity, seed, requestedGroups.Length > 0);
         var id = Guid.NewGuid();
         var sampleExtractions = rows.Select(x => x.ExtractionId).Distinct().Count();
@@ -156,7 +160,7 @@ public sealed class PredictionService(Db db)
 
     private async Task<DailyWindowChoice> RecommendDailyWindow(string bank, DateOnly targetDate, int quantity, TimeOnly baseTime)
     {
-        quantity = Math.Clamp(quantity, 1, 100);
+        quantity = Math.Clamp(quantity, 1, 10_000);
         var candidateWindows = new[] { 30, 60, 90, 120, 180, 240 };
         await using var connection = db.Open();
         var rows = (await connection.QueryAsync<Row>(
@@ -633,7 +637,7 @@ public sealed class PredictionService(Db db)
     public async Task<object> CompareWindows(string bank, DateOnly date, int quantity, int[] requestedWindows,
         bool useSameDayResults)
     {
-        quantity = Math.Clamp(quantity, 1, 100);
+        quantity = Math.Clamp(quantity, 1, 10_000);
         var windows = requestedWindows.Where(x => x is >= 7 and <= 3650).Distinct().Order().ToArray();
         if (windows.Length == 0) windows = [30, 60, 90, 120, 180, 240];
         await using var connection = db.Open();
@@ -693,7 +697,7 @@ public sealed class PredictionService(Db db)
         decimal dezenaPayout, decimal centenaPayout, decimal milharPayout, int prizeRange = 5, int maxEvaluations = 500,
         Action<int, int>? reportProgress = null)
     {
-        quantity = Math.Clamp(quantity, 1, 100);
+        quantity = Math.Clamp(quantity, 1, 10_000);
         prizeRange = Math.Clamp(prizeRange, 1, 10);
         maxEvaluations = Math.Clamp(maxEvaluations, 100, 3000);
         await using var connection = db.Open();
@@ -834,15 +838,22 @@ public sealed class PredictionService(Db db)
     private static List<PredictionCandidate> Select(List<Scored> ranked, int quantity, long seed, bool restrictedToGroups)
     {
         if (ranked.Count == 0) return [];
+        var groupIds = ranked.Select(x => x.Group).Distinct().Order().ToArray();
+        var quotas = groupIds.Select((group, index) => new { group, count = quantity / groupIds.Length + (index < quantity % groupIds.Length ? 1 : 0) })
+            .ToDictionary(x => x.group, x => x.count);
         var exploitationTarget = (int)Math.Round(quantity * .6, MidpointRounding.AwayFromZero);
         var emergingTarget = (int)Math.Round(quantity * .2, MidpointRounding.AwayFromZero);
         var explorationTarget = quantity - exploitationTarget - emergingTarget;
         var selected = new List<(Scored Candidate, string Type)>();
         var usedC = new HashSet<string>(); var usedD = new HashSet<string>(); var groups = new Dictionary<int, int>();
-        bool Add(Scored x, string type)
+        var usedM = new HashSet<string>();
+        bool Add(Scored x, string type, bool relaxDiversity = false)
         {
-            if (usedC.Contains(x.Centena) || (!restrictedToGroups && usedD.Contains(x.Dezena)) ||
-                (!restrictedToGroups && groups.GetValueOrDefault(x.Group) >= Math.Max(2, (int)Math.Ceiling(quantity / 25d)))) return false;
+            if (usedM.Contains(x.Milhar) ||
+                (restrictedToGroups && groups.GetValueOrDefault(x.Group) >= quotas[x.Group]) ||
+                (!relaxDiversity && (usedC.Contains(x.Centena) || (!restrictedToGroups && usedD.Contains(x.Dezena)) ||
+                (!restrictedToGroups && groups.GetValueOrDefault(x.Group) >= Math.Max(2, (int)Math.Ceiling(quantity / 25d)))))) return false;
+            usedM.Add(x.Milhar);
             usedC.Add(x.Centena); usedD.Add(x.Dezena); groups[x.Group] = groups.GetValueOrDefault(x.Group) + 1;
             selected.Add((x, type)); return true;
         }
@@ -853,6 +864,7 @@ public sealed class PredictionService(Db db)
         var pool = ranked.Take(Math.Max(500, ranked.Count * 40 / 100)).OrderBy(_ => random.NextDouble()).ToList();
         foreach (var x in pool) { if (selected.Count >= exploitationTarget + emergingTarget + explorationTarget) break; Add(x, "EXPLORATION"); }
         foreach (var x in ranked) { if (selected.Count >= quantity) break; Add(x, "EXPLORATION"); }
+        foreach (var x in ranked) { if (selected.Count >= quantity) break; Add(x, "EXPLORATION", relaxDiversity: true); }
         return selected.Select((x, i) => new PredictionCandidate(i + 1, x.Candidate.Milhar, x.Candidate.Centena,
             x.Candidate.Dezena, x.Candidate.Group, x.Type, x.Candidate.StatisticalScore, x.Candidate.FinalScore,
             x.Candidate.Features, x.Candidate.Reasons)).ToList();
