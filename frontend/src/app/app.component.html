@@ -89,9 +89,9 @@
   <section *ngIf="activeSection === 'predictions'">
     <div class="card">
       <div class="section-head"><div><h3>Histórico de ternos de dezena</h3><p class="muted">Conferência automática com os resultados importados, do 1º ao 5º. Cotação 13.000× por terno. Valores exibidos nesta seção.</p></div><button class="secondary" (click)="loadTernoHistory(ternoPage)" [disabled]="loadingTernos">{{loadingTernos ? 'Conferindo...' : 'Atualizar ternos'}}</button></div>
-      <p class="muted">Banca: {{predictionBank}} · use o filtro de banca abaixo para alterar.</p>
+      <label>Banca dos ternos <select [(ngModel)]="ternoHistoryBank" (ngModelChange)="loadTernoHistory(1)"><option value="LT NACIONAL">Loteria Nacional</option><option value="LOOK LOTERIAS">Look Loterias</option></select></label>
       <p *ngIf="!loadingTernos && !ternoHistory.length">Nenhum terno salvo para esta banca.</p>
-      <table *ngIf="ternoHistory.length"><thead><tr><th>Data</th><th>Horário</th><th>Jogos</th><th>Situação</th><th>Ternos acertados</th><th>Apostado</th><th>Retorno</th><th>Saldo</th><th></th></tr></thead><tbody><tr *ngFor="let item of ternoHistory"><td>{{item.targetDate | date:'dd/MM/yyyy'}}</td><td>{{item.time}}</td><td>{{item.quantity}}</td><td>{{item.status === 'EVALUATED' ? 'Conferido' : 'Aguardando 5 prêmios'}}</td><td>{{item.hits ?? '—'}}</td><td>{{money(item.totalStake)}}</td><td>{{item.returnAmount == null ? '—' : money(item.returnAmount)}}</td><td>{{item.profitAmount == null ? '—' : money(item.profitAmount)}}</td><td><button class="secondary small" (click)="openTerno(item.id)">Ver jogos</button></td></tr></tbody></table>
+      <div *ngIf="ternoHistory.length && hasPermission('predictions.write')" class="selection-bar"><button class="secondary small" (click)="toggleTernoPageSelection()">Selecionar/desmarcar página</button><span>{{selectedTernoIds.size}} selecionados</span><button class="danger" (click)="deleteTernos()" [disabled]="deletingTernos || loadingTernos || !selectedTernoIds.size">Excluir selecionados</button></div><table *ngIf="ternoHistory.length"><thead><tr><th *ngIf="hasPermission('predictions.write')">Selecionar</th><th>Data</th><th>Horário</th><th>Jogos</th><th>Situação</th><th>Ternos acertados</th><th>Apostado</th><th>Retorno</th><th>Saldo</th><th></th></tr></thead><tbody><tr *ngFor="let item of ternoHistory"><td *ngIf="hasPermission('predictions.write')" class="check-col"><input type="checkbox" [checked]="selectedTernoIds.has(item.id)" (change)="toggleTernoSelection(item.id, $any($event.target).checked)" aria-label="Selecionar registro de ternos"></td><td>{{item.targetDate | date:'dd/MM/yyyy'}}</td><td>{{item.time}}</td><td>{{item.quantity}}</td><td>{{item.status === 'EVALUATED' ? 'Conferido' : 'Aguardando 5 prêmios'}}</td><td>{{item.hits ?? '—'}}</td><td>{{money(item.totalStake)}}</td><td>{{item.returnAmount == null ? '—' : money(item.returnAmount)}}</td><td>{{item.profitAmount == null ? '—' : money(item.profitAmount)}}</td><td><button class="secondary small" (click)="openTerno(item.id)">Ver jogos</button><button *ngIf="hasPermission('predictions.write')" class="danger small" (click)="deleteTernos([item.id])" [disabled]="deletingTernos || loadingTernos">Excluir</button></td></tr></tbody></table>
       <div *ngIf="ternoTotalPages > 1" class="pagination"><button (click)="loadTernoHistory(ternoPage - 1)" [disabled]="loadingTernos || ternoPage <= 1">Anterior</button><span>{{ternoPage}} / {{ternoTotalPages}}</span><button (click)="loadTernoHistory(ternoPage + 1)" [disabled]="loadingTernos || ternoPage >= ternoTotalPages">Próxima</button></div>
       <ng-container *ngIf="selectedTerno" [ngTemplateOutlet]="ternoDetails" [ngTemplateOutletContext]="{ $implicit: selectedTerno }"></ng-container>
     </div>
@@ -122,20 +122,20 @@
       <h3>Terno de dezena</h3>
       <p class="muted">Cada jogo contém três dezenas distintas. As três devem aparecer em qualquer ordem do 1º ao 5º prêmio. Quantidade significa número de ternos, sem repetir combinações.</p>
       <div class="filters">
-        <label>Banca <select [(ngModel)]="bank"><option value="LT NACIONAL">Loteria Nacional</option><option value="LOOK LOTERIAS">Look Loterias</option></select></label>
-        <label>Data alvo <input type="date" [(ngModel)]="generationDate"></label>
-        <label>Horário <input type="time" [(ngModel)]="time"></label>
-        <label>Janela em dias <input type="number" min="7" max="3650" [(ngModel)]="generationWindowDays"></label>
+        <label>Banca <select [ngModel]="ternoBank" (ngModelChange)="onTernoBankChange($event)"><option value="LT NACIONAL">Loteria Nacional</option><option value="LOOK LOTERIAS">Look Loterias</option></select></label>
+        <label>Data alvo <input type="date" [(ngModel)]="ternoDate"></label>
+        <label>Horário <input type="time" [(ngModel)]="ternoTime"></label>
+        <label>Janela em dias <input type="number" min="7" max="3650" [(ngModel)]="ternoWindowDays"></label>
         <label>Quantidade de ternos <input type="number" min="1" [max]="maximumTernoQuantity" [(ngModel)]="ternoQuantity"></label>
         <label>Valor total (R$) <input type="number" min="0.01" max="1000000" step="0.01" [(ngModel)]="ternoTotalStake"></label>
         <label>Posições <output>1º ao 5º prêmio</output></label><label>Cotação <output>13.000×</output></label>
-        <button class="secondary" (click)="analyzeAnimalTrends()" [disabled]="loadingAnimalTrends">Ver animais</button>
+        <button class="secondary" (click)="analyzeTernoAnimalTrends()" [disabled]="loadingTernoAnimalTrends">Ver animais</button>
         <button *ngIf="hasPermission('predictions.write')" (click)="generateTernos()" [disabled]="generatingTernos">{{generatingTernos ? 'Gerando...' : 'Gerar e salvar ternos'}}</button>
       </div>
       <p class="selection-note">Valor por terno: {{money(ternoTotalStake / (ternoQuantity || 1))}} · Retorno por terno acertado: {{money(ternoPayoutPreview)}}. O retorno usa o valor total dividido pela quantidade, sem divisão adicional pelos cinco prêmios.</p>
-      <div *ngIf="animalTrends" class="animal-grid"><label *ngFor="let animal of animalTrends.animals" class="animal-option" [class.selected]="selectedAnimalGroups.has(animal.group)"><input type="checkbox" [checked]="selectedAnimalGroups.has(animal.group)" (change)="toggleAnimalGroup(animal.group, $any($event.target).checked)"><span><strong>{{animal.animal}}</strong><small>{{animal.dezenas.join(', ')}}</small></span></label></div>
-      <p class="muted">{{selectedAnimalGroups.size ? selectedAnimalGroups.size + ' animais selecionados' : 'Todos os animais'}} · até {{maximumTernoQuantity}} ternos. As dezenas serão combinadas entre os animais selecionados.</p>
-      <button *ngIf="selectedAnimalGroups.size" class="secondary small" (click)="clearAnimalGroups()">Limpar animais</button>
+      <div *ngIf="ternoAnimalTrends" class="animal-grid"><label *ngFor="let animal of ternoAnimalTrends.animals" class="animal-option" [class.selected]="selectedTernoAnimalGroups.has(animal.group)"><input type="checkbox" [checked]="selectedTernoAnimalGroups.has(animal.group)" (change)="toggleTernoAnimalGroup(animal.group, $any($event.target).checked)"><span><strong>{{animal.animal}}</strong><small>{{animal.dezenas.join(', ')}}</small></span></label></div>
+      <p class="muted">{{selectedTernoAnimalGroups.size ? selectedTernoAnimalGroups.size + ' animais selecionados' : 'Todos os animais'}} · até {{maximumTernoQuantity}} ternos. As dezenas serão combinadas entre os animais selecionados.</p>
+      <button *ngIf="selectedTernoAnimalGroups.size" class="secondary small" (click)="selectedTernoAnimalGroups.clear()">Limpar animais</button>
       <ng-container *ngIf="ternoGeneration" [ngTemplateOutlet]="ternoDetails" [ngTemplateOutletContext]="{ $implicit: ternoGeneration }"></ng-container>
     </div>
     <div class="card generator-card">
@@ -174,7 +174,7 @@
 
 <ng-template #ternoDetails let-terno>
   <div class="prediction-detail">
-    <div class="section-head"><h4>{{terno.quantity}} ternos · {{terno.bank}} · {{terno.targetDate | date:'dd/MM/yyyy'}} {{terno.time}}</h4><button class="secondary" (click)="copyTernos(terno)">Copiar ternos</button></div>
+    <div class="section-head"><h4>{{terno.quantity}} ternos · {{terno.bank}} · {{terno.targetDate | date:'dd/MM/yyyy'}} {{terno.time}}</h4><div class="row-actions"><button *ngIf="hasPermission('predictions.read')" class="secondary" (click)="checkTernoInHistory(terno.id)" [disabled]="checkingTerno">{{checkingTerno ? 'Conferindo...' : 'Conferir na base'}}</button><button class="secondary" (click)="copyTernos(terno)">Copiar ternos</button></div></div>
     <p>Total: {{money(terno.totalStake)}} · Por acerto: {{money(terno.payoutPerHit)}} · {{terno.status === 'EVALUATED' ? 'Conferido: ' + terno.hits + ' ternos acertados' : 'Aguardando os cinco prêmios'}}</p>
     <p *ngIf="terno.status === 'EVALUATED'">Retorno: {{money(terno.returnAmount)}} · Saldo: {{money(terno.profitAmount)}}</p>
     <div class="actual-results"><span *ngFor="let result of terno.actualResults">{{result.position}}º: {{result.number}}</span></div>

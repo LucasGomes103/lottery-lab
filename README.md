@@ -137,6 +137,11 @@ O valor total é dividido pela quantidade de ternos. Cada terno acertado retorna
 - `POST /api/ternos/generate` — gera e salva os ternos (`predictions.write`).
 - `GET /api/ternos?bank=LT%20NACIONAL&page=1` — histórico paginado com conferência (`predictions.read`).
 - `GET /api/ternos/{id}` — jogos, resultados, acertos e valores (`predictions.read`).
+- `POST /api/ternos/delete-batch` — exclui os IDs selecionados do histórico de ternos (`predictions.write`).
+
+O formulário de ternos possui banca, data, horário, janela e seleção de animais independentes do ranking. Trocar sua banca sugere o próximo horário dessa banca. O histórico permite excluir um registro ou os registros selecionados, com confirmação, e o detalhe permite **Conferir na base** novamente após a importação dos resultados.
+
+Verificação de regressão dos formulários: execute `node tests/terno-state.cjs` na pasta `frontend`.
 
 ### Modalidades simples e demais operações
 

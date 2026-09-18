@@ -70,6 +70,17 @@ export class AppComponent implements OnInit {
     generationDate = this.localDate();
     generationQuantity = 10;
     ternoQuantity = 10;
+    ternoBank = 'LT NACIONAL';
+    ternoTime = '21:00';
+    ternoDate = this.localDate();
+    ternoWindowDays = 240;
+    ternoAnimalTrends: any = null;
+    loadingTernoAnimalTrends = false;
+    selectedTernoAnimalGroups = new Set<number>();
+    selectedTernoIds = new Set<string>();
+    deletingTernos = false;
+    checkingTerno = false;
+    ternoHistoryBank = 'LT NACIONAL';
     ternoTotalStake = 10;
     generatingTernos = false;
     loadingTernos = false;
@@ -181,6 +192,7 @@ export class AppComponent implements OnInit {
 
     private afterLogin() {
         this.setNextTarget();
+        this.onTernoBankChange(this.ternoBank);
         if (this.currentUser?.mustChangePassword) return;
         if (this.hasPermission('imports.write')) { this.activeSection = 'import'; this.loadExternalSyncStatus(); }
         else if (this.hasPermission('history.read')) { this.activeSection = 'history'; this.loadHistory(1); }
@@ -406,8 +418,8 @@ export class AppComponent implements OnInit {
         this.applyRecommendedWindow();
     }
 
-    schedulesFor() {
-        return this.bank === 'LOOK LOTERIAS'
+    schedulesFor(bank = this.bank) {
+        return bank === 'LOOK LOTERIAS'
             ? ['07:00', '09:00', '11:00', '14:00', '16:00', '18:00', '21:00', '23:00']
             : ['02:00', '08:00', '10:00', '12:00', '15:00', '17:00', '21:00', '23:00'];
     }
@@ -581,7 +593,7 @@ export class AppComponent implements OnInit {
     get maximumGenerationQuantity() { return (this.selectedAnimalGroups.size || 25) * 400; }
 
     get maximumTernoQuantity() {
-        const n = (this.selectedAnimalGroups.size || 25) * 4;
+        const n = (this.selectedTernoAnimalGroups.size || 25) * 4;
         return Math.min(10000, n * (n - 1) * (n - 2) / 6);
     }
 
@@ -601,9 +613,9 @@ export class AppComponent implements OnInit {
         }
         this.generatingTernos = true;
         this.http.post<any>(this.api + '/ternos/generate', {
-            bank: this.bank, time: this.time, targetDate: this.generationDate,
-            quantity: this.ternoQuantity, windowDays: this.generationWindowDays,
-            groups: Array.from(this.selectedAnimalGroups), totalStake: this.ternoTotalStake
+            bank: this.ternoBank, time: this.ternoTime, targetDate: this.ternoDate,
+            quantity: this.ternoQuantity, windowDays: this.ternoWindowDays,
+            groups: Array.from(this.selectedTernoAnimalGroups), totalStake: this.ternoTotalStake
         }).subscribe({
             next: result => {
                 this.ternoGeneration = result;
@@ -617,10 +629,11 @@ export class AppComponent implements OnInit {
     loadTernoHistory(page = 1) {
         if (!this.hasPermission('predictions.read')) return;
         this.loadingTernos = true;
-        const params = new URLSearchParams({ bank: this.predictionBank, page: String(page) });
+        const params = new URLSearchParams({ bank: this.ternoHistoryBank, page: String(page) });
         this.http.get<any>(this.api + `/ternos?${params}`).subscribe({
             next: result => {
                 this.ternoHistory = result.items;
+                this.selectedTernoIds.clear();
                 this.ternoPage = result.page;
                 this.ternoTotalPages = result.totalPages;
                 this.loadingTernos = false;
@@ -637,6 +650,72 @@ export class AppComponent implements OnInit {
         this.http.get<any>(this.api + `/ternos/${id}`).subscribe({
             next: result => this.selectedTerno = result,
             error: error => this.error = this.errorMessage(error)
+        });
+    }
+
+    checkTernoInHistory(id: string) {
+        this.checkingTerno = true;
+        this.http.get<any>(this.api + `/ternos/${id}`).subscribe({
+            next: result => {
+                if (this.ternoGeneration?.id === id) this.ternoGeneration = result;
+                if (this.selectedTerno?.id === id) this.selectedTerno = result;
+                this.ternoHistory = this.ternoHistory.map(item => item.id === id ? result : item);
+                this.checkingTerno = false;
+                this.message = result.status === 'EVALUATED'
+                    ? `Conferência concluída: ${result.hits} ternos acertados. Retorno: ${this.money(result.returnAmount)}.`
+                    : 'A base ainda não contém todos os resultados do 1º ao 5º para a banca, data e horário deste terno.';
+            },
+            error: error => { this.checkingTerno = false; this.error = this.errorMessage(error); }
+        });
+    }
+
+    onTernoBankChange(bank: string) {
+        this.ternoBank = bank;
+        const now = new Date();
+        const schedules = this.schedulesFor(bank);
+        const next = schedules.find(value => this.minutes(value) > now.getHours() * 60 + now.getMinutes());
+        if (!next) now.setDate(now.getDate() + 1);
+        this.ternoTime = next || schedules[0];
+        this.ternoDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        this.ternoAnimalTrends = null;
+        this.selectedTernoAnimalGroups.clear();
+    }
+
+    analyzeTernoAnimalTrends() {
+        this.loadingTernoAnimalTrends = true;
+        const params = new URLSearchParams({ bank: this.ternoBank, time: this.ternoTime,
+            targetDate: this.ternoDate, windowDays: String(this.ternoWindowDays) });
+        this.http.get<any>(this.api + `/predictions/animal-trends?${params}`).subscribe({
+            next: response => { this.ternoAnimalTrends = response; this.loadingTernoAnimalTrends = false; },
+            error: error => { this.error = this.errorMessage(error); this.loadingTernoAnimalTrends = false; }
+        });
+    }
+
+    toggleTernoAnimalGroup(group: number, selected: boolean) {
+        if (selected) this.selectedTernoAnimalGroups.add(group); else this.selectedTernoAnimalGroups.delete(group);
+    }
+
+    toggleTernoSelection(id: string, selected: boolean) {
+        if (selected) this.selectedTernoIds.add(id); else this.selectedTernoIds.delete(id);
+    }
+
+    toggleTernoPageSelection() {
+        const all = this.ternoHistory.every(item => this.selectedTernoIds.has(item.id));
+        for (const item of this.ternoHistory) this.toggleTernoSelection(item.id, !all);
+    }
+
+    deleteTernos(ids = Array.from(this.selectedTernoIds)) {
+        if (this.deletingTernos || !ids.length || !window.confirm(`Excluir ${ids.length} registros de ternos e seus jogos?`)) return;
+        this.deletingTernos = true;
+        this.http.post<any>(this.api + '/ternos/delete-batch', { ids }).subscribe({
+            next: result => {
+                this.deletingTernos = false;
+                this.message = result.message;
+                if (ids.includes(this.selectedTerno?.id)) this.selectedTerno = null;
+                if (ids.includes(this.ternoGeneration?.id)) this.ternoGeneration = null;
+                this.loadTernoHistory(this.ternoPage);
+            },
+            error: error => { this.deletingTernos = false; this.error = this.errorMessage(error); }
         });
     }
 

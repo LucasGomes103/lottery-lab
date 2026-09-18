@@ -366,6 +366,16 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     [Authorize(Policy = Permissions.PredictionsRead)]
     public async Task<IActionResult> ListTernos(string? bank = null, int page = 1) => Ok(await predictions.ListTernos(bank, page));
 
+    [HttpPost("ternos/delete-batch")]
+    [Authorize(Policy = Permissions.PredictionsWrite)]
+    public async Task<IActionResult> DeleteTernos(PredictionDeleteRequest request)
+    {
+        if (request.Ids is null || request.Ids.Count == 0 || request.Ids.Count > 1000)
+            return BadRequest(new { message = "Selecione de 1 a 1000 registros de ternos para excluir." });
+        var count = await predictions.DeleteTernos(request.Ids);
+        return Ok(new { count, message = $"{count} registros de ternos excluídos." });
+    }
+
     [HttpGet("ternos/{id:guid}")]
     [Authorize(Policy = Permissions.PredictionsRead)]
     public async Task<IActionResult> GetTerno(Guid id) => await predictions.GetTerno(id) is { } terno ? Ok(terno) : NotFound();

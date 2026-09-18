@@ -111,10 +111,18 @@ public sealed partial class PredictionService
         await using var connection = db.Open();
         var args = new { bank = string.IsNullOrWhiteSpace(bank) ? null : bank.Trim(), offset = (page - 1) * 20 };
         var total = await connection.ExecuteScalarAsync<int>("select count(*) from terno_predictions where (@bank::text is null or bank=@bank)", args);
+        page = Math.Min(page, Math.Max(1, (int)Math.Ceiling(total / 20d)));
+        args = new { args.bank, offset = (page - 1) * 20 };
         var ids = await connection.QueryAsync<Guid>(
             "select id from terno_predictions where (@bank::text is null or bank=@bank) order by generated_at desc,id offset @offset limit 20", args);
         var items = new List<object>();
         foreach (var id in ids) if (await GetTerno(id, includeGames: false) is { } item) items.Add(item);
         return new { items, total, page, totalPages = (int)Math.Ceiling(total / 20d) };
+    }
+
+    public async Task<int> DeleteTernos(List<Guid> ids)
+    {
+        await using var connection = db.Open();
+        return await connection.ExecuteAsync("delete from terno_predictions where id=any(@ids)", new { ids = ids.Distinct().ToArray() });
     }
 }
