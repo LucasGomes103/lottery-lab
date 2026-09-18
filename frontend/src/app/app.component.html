@@ -87,6 +87,14 @@
   </section>
 
   <section *ngIf="activeSection === 'predictions'">
+    <div class="card">
+      <div class="section-head"><div><h3>Histórico de ternos de dezena</h3><p class="muted">Conferência automática com os resultados importados, do 1º ao 5º. Cotação 13.000× por terno. Valores exibidos nesta seção.</p></div><button class="secondary" (click)="loadTernoHistory(ternoPage)" [disabled]="loadingTernos">{{loadingTernos ? 'Conferindo...' : 'Atualizar ternos'}}</button></div>
+      <p class="muted">Banca: {{predictionBank}} · use o filtro de banca abaixo para alterar.</p>
+      <p *ngIf="!loadingTernos && !ternoHistory.length">Nenhum terno salvo para esta banca.</p>
+      <table *ngIf="ternoHistory.length"><thead><tr><th>Data</th><th>Horário</th><th>Jogos</th><th>Situação</th><th>Ternos acertados</th><th>Apostado</th><th>Retorno</th><th>Saldo</th><th></th></tr></thead><tbody><tr *ngFor="let item of ternoHistory"><td>{{item.targetDate | date:'dd/MM/yyyy'}}</td><td>{{item.time}}</td><td>{{item.quantity}}</td><td>{{item.status === 'EVALUATED' ? 'Conferido' : 'Aguardando 5 prêmios'}}</td><td>{{item.hits ?? '—'}}</td><td>{{money(item.totalStake)}}</td><td>{{item.returnAmount == null ? '—' : money(item.returnAmount)}}</td><td>{{item.profitAmount == null ? '—' : money(item.profitAmount)}}</td><td><button class="secondary small" (click)="openTerno(item.id)">Ver jogos</button></td></tr></tbody></table>
+      <div *ngIf="ternoTotalPages > 1" class="pagination"><button (click)="loadTernoHistory(ternoPage - 1)" [disabled]="loadingTernos || ternoPage <= 1">Anterior</button><span>{{ternoPage}} / {{ternoTotalPages}}</span><button (click)="loadTernoHistory(ternoPage + 1)" [disabled]="loadingTernos || ternoPage >= ternoTotalPages">Próxima</button></div>
+      <ng-container *ngIf="selectedTerno" [ngTemplateOutlet]="ternoDetails" [ngTemplateOutletContext]="{ $implicit: selectedTerno }"></ng-container>
+    </div>
     <div class="section-head"><div><h2>Previsões</h2><p class="muted">Consulte cada previsão salva e compare-a com os resultados posteriormente importados.</p></div><span class="badge">{{predictionTotal}} previsões</span></div>
     <div class="card">
       <div class="history-filters"><label>Banca <select [(ngModel)]="predictionBank"><option value="LT NACIONAL">Loteria Nacional</option><option value="LOOK LOTERIAS">Look Loterias</option></select></label><label>Data alvo <input type="date" [(ngModel)]="predictionDate"></label><label>Horário <input type="time" [(ngModel)]="predictionTime"></label><label>Situação <select [(ngModel)]="predictionStatusFilter"><option value="">Todas</option><option value="PENDING">Aguardando resultado</option><option value="EVALUATED">Conferida</option></select></label><label>Itens por página <select [(ngModel)]="predictionPageSize"><option [ngValue]="10">10</option><option [ngValue]="20">20</option><option [ngValue]="50">50</option><option [ngValue]="100">100</option></select></label><button (click)="loadPredictionHistory(1)">Filtrar</button><button class="secondary" (click)="clearPredictionFilters()">Limpar</button></div>
@@ -110,6 +118,26 @@
   <section *ngIf="activeSection === 'analysis'">
     <h2>Análise experimental</h2>
     <div class="card"><h3>Registrar aposta manual</h3><p class="muted">Cole as milhares; a data/hora inicial entre colchetes é ignorada. Centena e dezena são extraídas automaticamente de cada milhar.</p><div class="filters"><label>Banca <select [(ngModel)]="manualBank"><option value="LT NACIONAL">Loteria Nacional</option><option value="LOOK LOTERIAS">Look Loterias</option></select></label><label>Data <input type="date" [(ngModel)]="manualDate"></label><label>Horário <input type="time" [(ngModel)]="manualTime"></label><label>Posição jogada <select [(ngModel)]="manualPrizeRange"><option *ngFor="let n of [1,2,3,4,5,6,7,8,9,10]" [ngValue]="n">1º ao {{n}}º</option></select></label><label>Dezena (R$) <input type="number" min="0" step="0.01" [(ngModel)]="manualDezenaStake"></label><label>Centena (R$) <input type="number" min="0" step="0.01" [(ngModel)]="manualCentenaStake"></label><label>Milhar (R$) <input type="number" min="0" step="0.01" [(ngModel)]="manualMilharStake"></label></div><label>Milhares apostadas <textarea rows="4" [(ngModel)]="manualNumbersText" placeholder="0501 1404 2403 ..."></textarea></label><p class="selection-note"><strong>{{manualNumbersCount()}}</strong> milhares reconhecidas · total {{money(manualBetAmount())}} · por acerto: D {{money(manualPayout(manualDezenaStake, 90))}} · C {{money(manualPayout(manualCentenaStake, 900))}} · M {{money(manualPayout(manualMilharStake, 9000))}}.</p><button (click)="saveManualBet()" [disabled]="savingManualBet">{{savingManualBet ? 'Registrando...' : 'Registrar aposta manual'}}</button></div>
+    <div class="card generator-card">
+      <h3>Terno de dezena</h3>
+      <p class="muted">Cada jogo contém três dezenas distintas. As três devem aparecer em qualquer ordem do 1º ao 5º prêmio. Quantidade significa número de ternos, sem repetir combinações.</p>
+      <div class="filters">
+        <label>Banca <select [(ngModel)]="bank"><option value="LT NACIONAL">Loteria Nacional</option><option value="LOOK LOTERIAS">Look Loterias</option></select></label>
+        <label>Data alvo <input type="date" [(ngModel)]="generationDate"></label>
+        <label>Horário <input type="time" [(ngModel)]="time"></label>
+        <label>Janela em dias <input type="number" min="7" max="3650" [(ngModel)]="generationWindowDays"></label>
+        <label>Quantidade de ternos <input type="number" min="1" [max]="maximumTernoQuantity" [(ngModel)]="ternoQuantity"></label>
+        <label>Valor total (R$) <input type="number" min="0.01" max="1000000" step="0.01" [(ngModel)]="ternoTotalStake"></label>
+        <label>Posições <output>1º ao 5º prêmio</output></label><label>Cotação <output>13.000×</output></label>
+        <button class="secondary" (click)="analyzeAnimalTrends()" [disabled]="loadingAnimalTrends">Ver animais</button>
+        <button *ngIf="hasPermission('predictions.write')" (click)="generateTernos()" [disabled]="generatingTernos">{{generatingTernos ? 'Gerando...' : 'Gerar e salvar ternos'}}</button>
+      </div>
+      <p class="selection-note">Valor por terno: {{money(ternoTotalStake / (ternoQuantity || 1))}} · Retorno por terno acertado: {{money(ternoPayoutPreview)}}. O retorno usa o valor total dividido pela quantidade, sem divisão adicional pelos cinco prêmios.</p>
+      <div *ngIf="animalTrends" class="animal-grid"><label *ngFor="let animal of animalTrends.animals" class="animal-option" [class.selected]="selectedAnimalGroups.has(animal.group)"><input type="checkbox" [checked]="selectedAnimalGroups.has(animal.group)" (change)="toggleAnimalGroup(animal.group, $any($event.target).checked)"><span><strong>{{animal.animal}}</strong><small>{{animal.dezenas.join(', ')}}</small></span></label></div>
+      <p class="muted">{{selectedAnimalGroups.size ? selectedAnimalGroups.size + ' animais selecionados' : 'Todos os animais'}} · até {{maximumTernoQuantity}} ternos. As dezenas serão combinadas entre os animais selecionados.</p>
+      <button *ngIf="selectedAnimalGroups.size" class="secondary small" (click)="clearAnimalGroups()">Limpar animais</button>
+      <ng-container *ngIf="ternoGeneration" [ngTemplateOutlet]="ternoDetails" [ngTemplateOutletContext]="{ $implicit: ternoGeneration }"></ng-container>
+    </div>
     <div class="card generator-card">
       <h3>Motor híbrido de previsões</h3>
       <p class="muted">Combina frequência, horário, atraso moderado, continuidade, transições, momentum e diversidade. Cada execução é salva e poderá ser confrontada com o resultado real.</p>
@@ -143,3 +171,14 @@
   </section>
 </main>
 </ng-container>
+
+<ng-template #ternoDetails let-terno>
+  <div class="prediction-detail">
+    <div class="section-head"><h4>{{terno.quantity}} ternos · {{terno.bank}} · {{terno.targetDate | date:'dd/MM/yyyy'}} {{terno.time}}</h4><button class="secondary" (click)="copyTernos(terno)">Copiar ternos</button></div>
+    <p>Total: {{money(terno.totalStake)}} · Por acerto: {{money(terno.payoutPerHit)}} · {{terno.status === 'EVALUATED' ? 'Conferido: ' + terno.hits + ' ternos acertados' : 'Aguardando os cinco prêmios'}}</p>
+    <p *ngIf="terno.status === 'EVALUATED'">Retorno: {{money(terno.returnAmount)}} · Saldo: {{money(terno.profitAmount)}}</p>
+    <div class="actual-results"><span *ngFor="let result of terno.actualResults">{{result.position}}º: {{result.number}}</span></div>
+    <p class="muted">{{terno.warning}}</p>
+    <table><thead><tr><th>Jogo</th><th>Terno de dezena</th><th>Score histórico</th><th>Conferência</th></tr></thead><tbody><tr *ngFor="let game of terno.games" [class.row-hit]="terno.status === 'EVALUATED' && game.hit"><td>{{game.rank}}</td><td><strong>{{game.dezenas.join(' – ')}}</strong></td><td>{{game.score | number:'1.2-2'}}</td><td>{{terno.status !== 'EVALUATED' ? 'Pendente' : game.hit ? 'TERNO ACERTADO' : game.matchedDezenas + ' de 3 dezenas'}}</td></tr></tbody></table>
+  </div>
+</ng-template>

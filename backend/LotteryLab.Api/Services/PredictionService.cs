@@ -8,7 +8,7 @@ using LotteryLab.Api.Models;
 
 namespace LotteryLab.Api.Services;
 
-public sealed class PredictionService(Db db)
+public sealed partial class PredictionService(Db db)
 {
     private const string Algorithm = "HYBRID_EXPLORATION";
     private const int Version = 3;

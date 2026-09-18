@@ -353,6 +353,23 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         return Ok(await predictions.GenerateAndSave(request));
     }
 
+    [HttpPost("ternos/generate")]
+    [Authorize(Policy = Permissions.PredictionsWrite)]
+    public async Task<IActionResult> GenerateTernos(TernoRequest request)
+    {
+        if (!IsNational(request.Bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
+        try { return Ok(await predictions.GenerateTernos(request)); }
+        catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
+    }
+
+    [HttpGet("ternos")]
+    [Authorize(Policy = Permissions.PredictionsRead)]
+    public async Task<IActionResult> ListTernos(string? bank = null, int page = 1) => Ok(await predictions.ListTernos(bank, page));
+
+    [HttpGet("ternos/{id:guid}")]
+    [Authorize(Policy = Permissions.PredictionsRead)]
+    public async Task<IActionResult> GetTerno(Guid id) => await predictions.GetTerno(id) is { } terno ? Ok(terno) : NotFound();
+
     [HttpPost("predictions/generate-bank-day")]
     [Authorize(Policy = Permissions.PredictionsWrite)]
     public async Task<IActionResult> GeneratePredictionForBankDay(PredictionRequest request)

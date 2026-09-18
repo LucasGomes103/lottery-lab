@@ -69,6 +69,15 @@ export class AppComponent implements OnInit {
     windowDays = 15;
     generationDate = this.localDate();
     generationQuantity = 10;
+    ternoQuantity = 10;
+    ternoTotalStake = 10;
+    generatingTernos = false;
+    loadingTernos = false;
+    ternoGeneration: any = null;
+    ternoHistory: any[] = [];
+    ternoPage = 1;
+    ternoTotalPages = 1;
+    selectedTerno: any = null;
     generationWindowDays = 240;
     useRecommendedWindow = true;
     betAmount = 30;
@@ -571,6 +580,73 @@ export class AppComponent implements OnInit {
 
     get maximumGenerationQuantity() { return (this.selectedAnimalGroups.size || 25) * 400; }
 
+    get maximumTernoQuantity() {
+        const n = (this.selectedAnimalGroups.size || 25) * 4;
+        return Math.min(10000, n * (n - 1) * (n - 2) / 6);
+    }
+
+    get ternoPayoutPreview() {
+        return this.ternoQuantity > 0 ? this.ternoTotalStake / this.ternoQuantity * 13000 : 0;
+    }
+
+    generateTernos() {
+        this.error = '';
+        if (!Number.isInteger(this.ternoQuantity) || this.ternoQuantity < 1 || this.ternoQuantity > this.maximumTernoQuantity) {
+            this.error = `A seleção permite de 1 a ${this.maximumTernoQuantity} ternos distintos.`;
+            return;
+        }
+        if (!Number.isFinite(this.ternoTotalStake) || this.ternoTotalStake <= 0 || this.ternoTotalStake > 1000000) {
+            this.error = 'Informe um valor total positivo de até R$ 1.000.000.';
+            return;
+        }
+        this.generatingTernos = true;
+        this.http.post<any>(this.api + '/ternos/generate', {
+            bank: this.bank, time: this.time, targetDate: this.generationDate,
+            quantity: this.ternoQuantity, windowDays: this.generationWindowDays,
+            groups: Array.from(this.selectedAnimalGroups), totalStake: this.ternoTotalStake
+        }).subscribe({
+            next: result => {
+                this.ternoGeneration = result;
+                this.generatingTernos = false;
+                this.message = `${result.quantity} ternos salvos. Conferência do 1º ao 5º prêmio, cotação 13.000×.`;
+            },
+            error: error => { this.generatingTernos = false; this.error = this.errorMessage(error); }
+        });
+    }
+
+    loadTernoHistory(page = 1) {
+        if (!this.hasPermission('predictions.read')) return;
+        this.loadingTernos = true;
+        const params = new URLSearchParams({ bank: this.predictionBank, page: String(page) });
+        this.http.get<any>(this.api + `/ternos?${params}`).subscribe({
+            next: result => {
+                this.ternoHistory = result.items;
+                this.ternoPage = result.page;
+                this.ternoTotalPages = result.totalPages;
+                this.loadingTernos = false;
+                if (this.selectedTerno) {
+                    const selected = result.items.find((item: any) => item.id === this.selectedTerno.id);
+                    if (selected) this.openTerno(selected.id); else this.selectedTerno = null;
+                }
+            },
+            error: error => { this.loadingTernos = false; this.error = this.errorMessage(error); }
+        });
+    }
+
+    openTerno(id: string) {
+        this.http.get<any>(this.api + `/ternos/${id}`).subscribe({
+            next: result => this.selectedTerno = result,
+            error: error => this.error = this.errorMessage(error)
+        });
+    }
+
+    async copyTernos(terno: any) {
+        try {
+            await navigator.clipboard.writeText(terno.games.map((game: any) => game.dezenas.join('-')).join('\n'));
+            this.message = `${terno.quantity} ternos copiados.`;
+        } catch { this.error = 'Não foi possível copiar os ternos. Selecione e copie os jogos da tabela.'; }
+    }
+
     generateNumbers() {
         if (!Number.isInteger(this.generationQuantity) || this.generationQuantity < 1 || this.generationQuantity > this.maximumGenerationQuantity) {
             this.error = `Informe uma quantidade inteira entre 1 e ${this.maximumGenerationQuantity} para os animais selecionados.`;
@@ -694,6 +770,7 @@ export class AppComponent implements OnInit {
     }
 
     loadPredictionHistory(page = 1) {
+        this.loadTernoHistory();
         this.predictionPage = Math.max(1, page);
         this.loadingPredictions = true;
         const params = new URLSearchParams({ page: String(this.predictionPage), pageSize: String(this.predictionPageSize) });

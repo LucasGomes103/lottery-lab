@@ -126,6 +126,20 @@ A API usa `POST /v1/responses`. A chave fica **somente no backend** via `OPENAI_
 A IA recebe resultados agregados do Forecast/Backtest. O banco continua sendo a fonte da verdade, portanto o histórico não depende de uma conversa específica do ChatGPT.
 
 ## Endpoints
+### Terno de dezena
+
+Em **Análises > Terno de dezena**, informe banca, data, horário, janela histórica, quantidade de ternos e valor total. Os animais selecionados restringem as dezenas disponíveis; cada jogo combina três dezenas distintas, sem repetir permutações. A quantidade máxima depende das combinações disponíveis, limitada a 10.000 jogos por geração.
+
+Os jogos são salvos separadamente em `terno_predictions`, criada automaticamente na inicialização da API. **Previsões > Histórico de ternos de dezena** confere os jogos ao consultar/atualizar a lista usando os resultados importados mais recentes. A conferência fica pendente até existirem todas as posições do 1º ao 5º prêmio. As três dezenas devem aparecer em qualquer ordem nesse intervalo; resultados repetidos não contam como dezenas diferentes e o 6º prêmio em diante não participa.
+
+O valor total é dividido pela quantidade de ternos. Cada terno acertado retorna essa fração multiplicada por **13.000**, arredondada para centavos, sem divisão adicional por cinco. Cada combinação paga uma vez por extração, mesmo quando uma dezena aparece em mais de uma posição. Retorno e saldo dos ternos aparecem no histórico próprio e não integram o dashboard das modalidades simples.
+
+- `POST /api/ternos/generate` — gera e salva os ternos (`predictions.write`).
+- `GET /api/ternos?bank=LT%20NACIONAL&page=1` — histórico paginado com conferência (`predictions.read`).
+- `GET /api/ternos/{id}` — jogos, resultados, acertos e valores (`predictions.read`).
+
+### Modalidades simples e demais operações
+
 - `POST /api/imports/preview` — multipart PDF, com fallback OCR e múltiplos horários
 - `POST /api/imports/commit` — confirma todas as extrações revisadas da prévia
 - `POST /api/imports/sync?date=2026-08-28` — busca e insere horários ausentes da fonte externa

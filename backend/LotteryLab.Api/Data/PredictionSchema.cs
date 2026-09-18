@@ -11,6 +11,22 @@ public sealed class PredictionSchema(Db db)
     }
 
     public const string Sql = """
+        create table if not exists terno_predictions (
+            id uuid primary key,
+            bank varchar(120) not null,
+            target_date date not null,
+            target_time time not null,
+            quantity integer not null check(quantity between 1 and 10000),
+            window_days integer not null,
+            first_prize integer not null default 1 check(first_prize = 1),
+            last_prize integer not null default 5 check(last_prize = 5),
+            games jsonb not null,
+            groups jsonb not null,
+            total_stake numeric(12,2) not null check(total_stake > 0),
+            generated_at timestamptz not null default now()
+        );
+        create index if not exists ix_terno_predictions_target on terno_predictions(bank,target_date,target_time);
+
         create table if not exists algorithm_versions (
             id bigserial primary key,
             code varchar(80) not null,
