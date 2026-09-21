@@ -10,8 +10,8 @@ namespace LotteryLab.Api.Services;
 
 public sealed partial class PredictionService(Db db)
 {
-    private const string Algorithm = "HYBRID_EXPLORATION";
-    private const int Version = 3;
+    private const string Algorithm = MilharPredictionSelection.Algorithm;
+    private const int Version = MilharPredictionSelection.Version;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] Animals = ["AVESTRUZ", "AGUIA", "BURRO", "BORBOLETA", "CACHORRO", "CABRA",
         "CARNEIRO", "CAMELO", "COBRA", "COELHO", "CAVALO", "ELEFANTE", "GALO", "GATO", "JACARE", "LEAO",
@@ -68,28 +68,25 @@ public sealed partial class PredictionService(Db db)
               from results r join extractions e on e.id=r.extraction_id
               where e.bank=@bank and e.extraction_date>=@start
                 and (e.extraction_date<@date or (e.extraction_date=@date and e.extraction_time<@time::time))
-                and r.position between 1 and 10
+                and r.position between 1 and @prizeRange
               order by e.extraction_date,e.extraction_time,r.position",
-            new { bank, start = start.Date, date = target.Date, time = targetTime.ToString("HH:mm") })).ToList();
+            new { bank, start = start.Date, date = target.Date, time = targetTime.ToString("HH:mm"), prizeRange })).ToList();
 
-        var priorAppearances = (await connection.QueryAsync<string>(
-            @"select pc.milhar from prediction_candidates pc join predictions p on p.id=pc.prediction_id
-              where p.bank=@bank and p.target_time=@time::time order by p.generated_at desc limit 500",
-            new { bank, time = targetTime.ToString("HH:mm") })).GroupBy(x => x).ToDictionary(x => x.Key, x => x.Count());
-
-        var ranked = Score(rows, targetTime, priorAppearances);
-        if (requestedGroups.Length > 0) ranked = ranked.Where(x => requestedGroups.Contains(x.Group)).ToList();
-        if (ranked.Count < quantity) throw new ArgumentException("Histórico insuficiente para gerar a quantidade solicitada.");
-        var selected = Select(ranked, quantity, seed, requestedGroups.Length > 0);
+        rows = rows.Where(x => MilharStatisticsEngine.ValidNumber(x.Number)).ToList();
+        var statisticalConfiguration = request.StatisticalConfiguration ?? new MilharConfiguration();
+        var selected = StatisticalCandidates(rows, bank, target, quantity, prizeRange, requestedGroups, statisticalConfiguration);
         var id = Guid.NewGuid();
         var sampleExtractions = rows.Select(x => x.ExtractionId).Distinct().Count();
         var robustness = sampleExtractions < 30 ? "INSUFICIENTE" : sampleExtractions < 100 ? "BAIXA" : "EXPERIMENTAL";
         var composition = new
         {
-            exploitation = selected.Count(x => x.SelectionType == "EXPLOITATION"),
+            exploitation = selected.Count,
             emerging = selected.Count(x => x.SelectionType == "EMERGING"),
             exploration = selected.Count(x => x.SelectionType == "EXPLORATION"),
             deterministicSeed = seed,
+            statisticalEngine = MilharStatisticsEngine.Version,
+            statisticalConfiguration,
+            selection = "Score decrescente; cotas equilibradas somente quando há animais selecionados.",
             restrictedGroups = requestedGroups,
             requestedWindowDays,
             usedRecommendedWindow = request.UseRecommendedWindow,
@@ -143,7 +140,7 @@ public sealed partial class PredictionService(Db db)
         DailyWindowChoice? dailyWindow = null;
         if (request.UseRecommendedWindow)
             dailyWindow = await RecommendDailyWindow(bank, request.TargetDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(-3)),
-                request.Quantity, TimeOnly.Parse(schedules[0]));
+                request.Quantity, TimeOnly.Parse(schedules[0]), request.PrizeRange, request.Groups ?? [], request.StatisticalConfiguration ?? new());
         var source = await GenerateAndSaveInternal(dailyRequest, dailyWindow?.WindowDays, dailyWindow);
         var predictions = new List<PredictionResponse> { source };
         foreach (var targetTime in schedules.Where(x => x != source.Time))
@@ -158,7 +155,8 @@ public sealed partial class PredictionService(Db db)
             " Cada horário é uma aposta e conferência independente.");
     }
 
-    private async Task<DailyWindowChoice> RecommendDailyWindow(string bank, DateOnly targetDate, int quantity, TimeOnly baseTime)
+    private async Task<DailyWindowChoice> RecommendDailyWindow(string bank, DateOnly targetDate, int quantity, TimeOnly baseTime,
+        int prizeRange, List<int> groups, MilharConfiguration configuration)
     {
         quantity = Math.Clamp(quantity, 1, 10_000);
         var candidateWindows = new[] { 30, 60, 90, 120, 180, 240 };
@@ -170,6 +168,7 @@ public sealed partial class PredictionService(Db db)
               where e.bank=@bank and e.extraction_date<@targetDate and r.position between 1 and 10
               order by e.extraction_date,e.extraction_time,r.position",
             new { bank, targetDate = targetDate.ToDateTime(TimeOnly.MinValue) })).ToList();
+        rows = rows.Where(x => x.Position <= Math.Clamp(prizeRange, 1, 10) && MilharStatisticsEngine.ValidNumber(x.Number)).ToList();
         var dates = rows.GroupBy(x => x.Date.Date)
             .Where(day => day.Select(x => x.ExtractionId).Distinct().Count() >= 4)
             .Select(day => DateOnly.FromDateTime(day.Key)).OrderDescending().Take(60).Order().ToList();
@@ -186,8 +185,8 @@ public sealed partial class PredictionService(Db db)
                 var historyEnd = date.ToDateTime(TimeOnly.MinValue);
                 var history = rows.Where(x => x.Date < historyEnd && x.Date >= historyStart).ToList();
                 if (history.Count == 0) continue;
-                var seed = StableSeed($"daily-window:{bank}:{date:yyyy-MM-dd}:{window}:{quantity}");
-                var picks = Select(Score(history, baseTime, [], true), quantity, seed, false);
+                var picks = StatisticalCandidates(history, bank, date.ToDateTime(baseTime), quantity,
+                    Math.Clamp(prizeRange, 1, 10), groups.Where(g => g is >= 1 and <= 25).Distinct().ToArray(), configuration);
                 var actual = rows.Where(x => x.Date.Date == historyEnd).Select(x => x.Number.PadLeft(4, '0')[^4..]).ToList();
                 milharHits += picks.Sum(pick => actual.Count(number => number == pick.Milhar));
                 centenaHits += picks.Sum(pick => actual.Count(number => number.EndsWith(pick.Centena)));
@@ -665,14 +664,9 @@ public sealed partial class PredictionService(Db db)
                       order by e.extraction_date,e.extraction_time,r.position",
                     new { bank, start = target.AddDays(-windowDays).Date, date = target.Date,
                         time = targetTime.ToString("HH:mm"), useSameDayResults })).ToList();
-                var priorAppearances = (await connection.QueryAsync<string>(
-                    @"select pc.milhar from prediction_candidates pc join predictions p on p.id=pc.prediction_id
-                      where p.bank=@bank and p.target_time=@time::time and p.target_date<@date
-                      order by p.generated_at desc limit 500",
-                    new { bank, time = targetTime.ToString("HH:mm"), date = target.Date }))
-                    .GroupBy(x => x).ToDictionary(x => x.Key, x => x.Count());
-                var seed = StableSeed($"{Algorithm}:{Version}:{bank}:{date:yyyy-MM-dd}:{targetTime:HH:mm}:{windowDays}:{quantity}:ALL");
-                var selected = Select(Score(rows, targetTime, priorAppearances), quantity, seed, false);
+                rows = rows.Where(x => MilharStatisticsEngine.ValidNumber(x.Number)).ToList();
+                var selected = rows.Count == 0 ? new List<PredictionCandidate>()
+                    : StatisticalCandidates(rows, bank, target, quantity, 10, [], new());
                 var actual = (await connection.QueryAsync<string>(
                     @"select r.number from results r join extractions e on e.id=r.extraction_id
                       where e.bank=@bank and e.extraction_date=@date and e.extraction_time=@time::time
@@ -782,6 +776,13 @@ public sealed partial class PredictionService(Db db)
             interpretation = "O intervalo de 95% mede a diferença média de saldo por previsão contra o aleatório no teste. Se ele inclui zero, não há evidência estatística de superioridade.",
             warning = "Esta bateria avalia desempenho histórico e não torna sorteios independentes previsíveis nem garante retorno futuro." };
     }
+
+    private static List<PredictionCandidate> StatisticalCandidates(List<Row> rows, string bank, DateTime cutoff,
+        int quantity, int prizeRange, int[] groups, MilharConfiguration configuration) =>
+        MilharPredictionSelection.Generate(rows.Select(x => new MilharObservation(x.ExtractionId, x.Date.Date.Add(x.Time), bank,
+            TimeOnly.FromTimeSpan(x.Time).ToString("HH:mm"), x.Position, x.Number,
+            MilharStatisticsEngine.ValidNumber(x.Number) ? GroupOf(x.Number) : null)).ToArray(),
+            bank, cutoff, quantity, prizeRange, groups, configuration);
 
     private static List<Scored> Score(List<Row> rows, TimeOnly targetTime, Dictionary<string, int> priorAppearances, bool v3 = true)
     {

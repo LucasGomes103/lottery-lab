@@ -1,5 +1,13 @@
 # Motor Estatístico de Milhares · versão 1
 
+## Integração com Gerar ranking
+
+O botão existente **Gerar ranking** e a geração para o dia inteiro agora usam `MilharPredictionSelection`, que chama o modelo C deste motor. O contrato `/api/predictions/generate` continua o mesmo e aceita opcionalmente `statisticalConfiguration`. O histórico é limitado pela janela de dias do formulário e pelas posições do 1º ao prêmio selecionado. Sem restrição de animais, retorna exatamente as maiores pontuações. Com animais selecionados, mantém cotas equilibradas e seleciona os maiores scores dentro delas. Não aplica exploração aleatória ou penalidade baseada em previsões anteriores.
+
+As previsões são identificadas por `MILHAR_STATISTICS V1`. Configuração e versão ficam no JSON da previsão; os sete scores em `features.statistics` e o ranking original em `features.statisticalRank`. A tela existente mantém escala de score 0–100; componentes internos ficam em 0–1. A seleção e os valores financeiros continuam gravados/conferidos nas mesmas tabelas. Previsões antigas preservam algoritmo e features originais.
+
+A janela automática diária também compara as janelas usando o novo modelo, o prêmio e os animais escolhidos. Os presets automáticos por horário continuam sendo os valores existentes (não foram recalibrados para o novo motor). A bateria explicitamente rotulada V2/V3 continua disponível como comparação histórica dos modelos anteriores.
+
 ## Análise da arquitetura e reaproveitamento
 
 O projeto usa .NET 8, controllers MVC, serviços com Dapper/Npgsql e PostgreSQL. Não existe camada de repositories: as consultas ficam nos serviços e usam `Db`. O frontend usa Angular 19 standalone, com navegação central em `AppComponent`, autenticação por interceptor e estilos globais. O novo componente segue essa navegação e esses estilos.

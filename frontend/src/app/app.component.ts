@@ -960,7 +960,9 @@ export class AppComponent implements OnInit {
         return item.status === 'EVALUATED' ? 'Conferida' : 'Aguardando resultado';
     }
 
-    private sortByGroupAndMilhar<T extends { group: number; milhar: string }>(items: T[] | null | undefined) {
+    private sortByGroupAndMilhar<T extends { group: number; milhar: string; selectionType?: string; rank?: number }>(items: T[] | null | undefined) {
+        if (items?.some(item => item.selectionType === 'STATISTICAL'))
+            return [...items].sort((left, right) => (left.rank ?? 0) - (right.rank ?? 0));
         return [...(items || [])].sort((left, right) => Number(left.group) - Number(right.group)
             || String(left.milhar).localeCompare(String(right.milhar), 'pt-BR', { numeric: true }));
     }

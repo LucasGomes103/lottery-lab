@@ -4,7 +4,8 @@ public record PredictionRequest(string Bank, string Time, DateOnly? TargetDate =
     int Quantity = 10, List<int>? Groups = null, bool UseRecommendedWindow = true,
     decimal BetAmount = 30m, decimal DezenaPayout = 8.57m, decimal CentenaPayout = 57.14m,
     decimal MilharPayout = 296.30m, int PrizeRange = 5,
-    decimal DezenaStake = 10m, decimal CentenaStake = 10m, decimal MilharStake = 10m);
+    decimal DezenaStake = 10m, decimal CentenaStake = 10m, decimal MilharStake = 10m,
+    MilharConfiguration? StatisticalConfiguration = null);
 public record PredictionDeleteRequest(List<Guid> Ids);
 
 public record ManualPredictionRequest(string Bank, string Time, DateOnly TargetDate, string Numbers,
@@ -13,7 +14,8 @@ public record ManualPredictionRequest(string Bank, string Time, DateOnly TargetD
 public record PredictionFeatures(
     double Frequency, double TimeFrequency, double Delay, double Continuity,
     double Transition, double Momentum, double Reversal, double DigitAffinity,
-    double Novelty, double RepetitionPenalty);
+    double Novelty, double RepetitionPenalty,
+    MilharScores? Statistics = null, int? StatisticalRank = null);
 
 public record PredictionCandidate(
     int Rank, string Milhar, string Centena, string Dezena, int Group,

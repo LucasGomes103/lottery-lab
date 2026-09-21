@@ -63,6 +63,8 @@ Em **Análises > Análise de Milhares**, o motor estatístico ordena as 10.000 c
 
 O módulo reutiliza `extractions` e `results`, sem migração. As rotas `/api/statistics/milhar-ranking`, `/api/statistics/milhar-backtest` e a auditoria por extração exigem `analysis.use`. Veja [arquitetura, fórmulas, contratos e limites](docs/milhar-statistics.md). O relatório pode ser exportado em JSON; configurações vencedoras são salvas no navegador.
 
+O botão existente **Gerar ranking** também usa o novo modelo composto C, assim como a geração para o dia inteiro e a comparação de janelas. As previsões são salvas como `MILHAR_STATISTICS V1`, com componentes e configuração auditáveis. Mantém os valores financeiros, a janela e a distribuição entre animais selecionados; sem animais selecionados, retorna diretamente os maiores scores. As previsões antigas e a bateria V2/V3 permanecem identificadas pelos modelos originais.
+
 ## Motor de previsões V2
 - Persiste previsões imutáveis, versão do algoritmo, seed reproduzível, features e justificativas.
 - Combina frequência global e do horário, atraso com peso baixo, continuidade, transição entre horários, momentum, reversão, afinidade de dígitos e novidade.
