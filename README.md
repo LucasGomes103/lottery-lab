@@ -57,6 +57,12 @@ Um arquivo pode gerar várias extrações independentes (por exemplo 02h, 08h, 1
 ## Banco
 Em uma instalação nova, execute `database/schema.sql` uma vez. As tabelas do motor de previsões são criadas de forma idempotente pela própria API durante a inicialização; `database/002_prediction_engine.sql` também documenta a migração para execução manual/auditoria.
 
+## Análise de Milhares
+
+Em **Análises > Análise de Milhares**, o motor estatístico ordena as 10.000 candidatas por sete componentes configuráveis, com evidências por número. O backtest walk-forward compara A/B/C, baseline aleatório, intervalos de confiança e ablações, com divisão cronológica 60/20/20 e busca opcional apenas na validação.
+
+O módulo reutiliza `extractions` e `results`, sem migração. As rotas `/api/statistics/milhar-ranking`, `/api/statistics/milhar-backtest` e a auditoria por extração exigem `analysis.use`. Veja [arquitetura, fórmulas, contratos e limites](docs/milhar-statistics.md). O relatório pode ser exportado em JSON; configurações vencedoras são salvas no navegador.
+
 ## Motor de previsões V2
 - Persiste previsões imutáveis, versão do algoritmo, seed reproduzível, features e justificativas.
 - Combina frequência global e do horário, atraso com peso baixo, continuidade, transição entre horários, momentum, reversão, afinidade de dígitos e novidade.

@@ -10,7 +10,7 @@ public sealed class PdfImportServiceTests
     private readonly PdfImportService service = new(new ConfigurationBuilder().Build(), NullLogger<PdfImportService>.Instance);
 
     [Fact]
-    public void ParseText_SeparatesSchedulesAndPreservesNumberWidths()
+    public void ParseText_SeparatesSchedulesAndNormalizesNumbersToFourDigits()
     {
         const string text = """
             RESULTADOS
@@ -40,8 +40,8 @@ public sealed class PdfImportServiceTests
         Assert.Equal("15:00", extractions[0].Time);
         Assert.Equal(new DateOnly(2026, 8, 26), extractions[0].Date);
         Assert.Equal("0110", extractions[0].Results[0].Number);
-        Assert.Equal("052", extractions[0].Results[6].Number);
-        Assert.Null(extractions[0].Results[6].Milhar);
+        Assert.Equal("0052", extractions[0].Results[6].Number);
+        Assert.Equal("0052", extractions[0].Results[6].Milhar);
         Assert.Equal("0060", extractions[1].Results[1].Number);
         Assert.Equal("060", extractions[1].Results[1].Centena);
         Assert.Equal("60", extractions[1].Results[1].Dezena);

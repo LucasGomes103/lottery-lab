@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { forkJoin } from 'rxjs';
+import { MilharStatisticsComponent } from './milhar-statistics.component';
 
 interface ParsedResult { position: number; number: string; milhar: string | null; centena: string | null; dezena: string | null; group: number | null; animal: string | null; }
 interface ParsedExtraction { date: string | null; bank: string; time: string | null; results: ParsedResult[]; warnings: string[]; }
@@ -14,7 +15,7 @@ interface GeneratedNumber { rank: number; milhar: string; centena: string; dezen
 interface GenerationResponse { id: string; algorithm: string; algorithmVersion: number; bank: string; time: string; targetDate: string; windowDays: number; quantity: number; randomSeed: number; sampleExtractions: number; sampleResults: number; robustness: string; composition: any; numbers: GeneratedNumber[]; warning: string; betAmount: number; dezenaPayout: number; centenaPayout: number; milharPayout: number; usedRecommendedWindow: boolean; prizeRange: number; dezenaStake: number; centenaStake: number; milharStake: number; }
 interface BankDayGenerationResponse { sourcePrediction: GenerationResponse; predictions: GenerationResponse[]; totalBetAmount: number; message: string; }
 
-@Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule], templateUrl: './app.component.html' })
+@Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule, MilharStatisticsComponent], templateUrl: './app.component.html' })
 export class AppComponent implements OnInit {
     private http = inject(HttpClient);
     api = location.hostname === 'localhost' ? 'http://localhost:8080/api' : 'https://lottery-lab.onrender.com/api';
