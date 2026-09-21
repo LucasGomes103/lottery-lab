@@ -30,7 +30,6 @@ builder.Services.AddRateLimiter(options =>
 });
 builder.Services.AddScoped<PdfImportService>();
 builder.Services.AddScoped<AnalysisService>();
-builder.Services.AddScoped<MilharStatisticsService>();
 builder.Services.AddScoped<AiService>();
 builder.Services.AddScoped<NumberGeneratorService>();
 builder.Services.AddScoped<PredictionService>();
