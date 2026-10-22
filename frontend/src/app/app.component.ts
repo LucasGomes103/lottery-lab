@@ -252,6 +252,120 @@ export class AppComponent implements OnInit {
         if (section === 'dashboard') { this.loadDashboard(); this.loadMegaStatistics(); }
         if (section === 'megasena') this.openMegaTab(this.megaTab);
         if (section === 'users') this.loadUsers();
+        if (section === 'analysis') this.openAnalysis();
+    }
+
+    // Estado visual da tela de Análises: abas, filtros compartilhados e painéis recolhíveis.
+    analysisTab: 'generate' | 'result' | 'validation' | 'ranking' = 'generate';
+    generatorKind: 'hybrid' | 'terno' = 'hybrid';
+    showAdvancedOptions = false;
+    showManualBet = false;
+    expandedReasonRanks = new Set<number>();
+    openValidationDetails = new Set<string>();
+    private topNumbersSource: GeneratedNumber[] | null = null;
+    private topNumbersRows: GeneratedNumber[] = [];
+
+    private openAnalysis() {
+        try {
+            const saved = localStorage.getItem('lotteryLabAnalysisTab');
+            if (saved === 'generate' || saved === 'result' || saved === 'validation' || saved === 'ranking') this.analysisTab = saved;
+        } catch { }
+        this.syncAnalysisContext();
+    }
+
+    setAnalysisTab(tab: 'generate' | 'result' | 'validation' | 'ranking') {
+        this.analysisTab = tab;
+        try { localStorage.setItem('lotteryLabAnalysisTab', tab); } catch { }
+    }
+
+    // Os filtros do topo alimentam os modelos já usados pelo motor híbrido, pelos ternos e pelo ranking.
+    syncAnalysisContext() {
+        this.ternoBank = this.bank;
+        this.ternoDate = this.generationDate;
+        this.ternoTime = this.time;
+        this.ternoWindowDays = this.generationWindowDays;
+        this.analysisTime = this.time;
+        this.windowDays = this.generationWindowDays;
+    }
+
+    private resetAnimalSelections() {
+        this.animalTrends = null;
+        this.selectedAnimalGroups.clear();
+        this.ternoAnimalTrends = null;
+        this.selectedTernoAnimalGroups.clear();
+    }
+
+    setAnalysisBank(bank: string) {
+        if (bank === this.bank) return;
+        this.onGenerationBankChange(bank);
+        this.resetAnimalSelections();
+        this.syncAnalysisContext();
+    }
+
+    setAnalysisTime(time: string) {
+        this.onGenerationTimeChange(time);
+        this.resetAnimalSelections();
+        this.syncAnalysisContext();
+    }
+
+    setAnalysisDate(date: string) {
+        this.generationDate = date;
+        this.syncAnalysisContext();
+    }
+
+    setAnalysisWindow(days: number) {
+        this.generationWindowDays = Number(days) || 0;
+        this.syncAnalysisContext();
+    }
+
+    setRecommendedWindow(enabled: boolean) {
+        this.useRecommendedWindow = enabled;
+        this.applyRecommendedWindow();
+        this.syncAnalysisContext();
+    }
+
+    toggleReasons(rank: number) {
+        if (this.expandedReasonRanks.has(rank)) this.expandedReasonRanks.delete(rank); else this.expandedReasonRanks.add(rank);
+    }
+
+    toggleValidationDetails(key: string) {
+        if (this.openValidationDetails.has(key)) this.openValidationDetails.delete(key); else this.openValidationDetails.add(key);
+    }
+
+    topNumbers(numbers: GeneratedNumber[] | null | undefined) {
+        if (numbers !== this.topNumbersSource) {
+            this.topNumbersSource = numbers || null;
+            this.topNumbersRows = [...(numbers || [])].sort((a, b) => b.finalScore - a.finalScore).slice(0, 5);
+        }
+        return this.topNumbersRows;
+    }
+
+    animalTitle(animal: any) {
+        return `Score ${animal.score ?? '—'}${animal.reasons?.length ? ' · ' + animal.reasons.join(' / ') : ''} · dezenas ${(animal.dezenas || []).join(', ')}`;
+    }
+
+    rankingPercent(score: any, rows: any[] | null | undefined) {
+        const max = Math.max(0, ...(rows || []).map(row => Math.abs(Number(row.score) || 0)));
+        return max ? Math.round(Math.abs(Number(score) || 0) / max * 100) : 0;
+    }
+
+    roiBarPercent(value: number, models: any[] | null | undefined) {
+        const max = Math.max(0, ...(models || []).map(row => Math.abs(Number(row.roiPercent) || 0)));
+        return max ? Math.round(Math.abs(Number(value) || 0) / max * 100) : 0;
+    }
+
+    validationVerdict() {
+        if (this.decisionBattery?.decision) {
+            return String(this.decisionBattery.decision).startsWith('SINAL POSITIVO')
+                ? { tone: 'positive', title: 'O modelo mostrou sinal positivo no replay', text: 'Mesmo assim, mantenha só em teste controlado: com mais dados o resultado pode mudar.' }
+                : { tone: 'neutral', title: 'O modelo não superou o aleatório', text: 'A diferença está dentro do que o acaso explica. Use as previsões como experimento, não como vantagem.' };
+        }
+        if (this.randomness?.verdict) {
+            return String(this.randomness.verdict).startsWith('DESVIO')
+                ? { tone: 'warning', title: 'Foi detectado um desvio nos sorteios', text: 'Confirme com o replay histórico antes de tirar qualquer conclusão.' }
+                : { tone: 'neutral', title: 'Os sorteios se comportam como aleatórios', text: 'Nenhum padrão foi encontrado no histórico, então nenhuma fórmula consegue prever melhor que o acaso.' };
+        }
+        return { tone: 'idle', title: 'Nenhum teste executado ainda', text: 'Execute o replay histórico para saber se o modelo supera o aleatório.' };
     }
 
     searchMilhar() {
@@ -671,6 +785,8 @@ export class AppComponent implements OnInit {
         }).subscribe({
             next: result => {
                 this.ternoGeneration = result;
+                this.generatorKind = 'terno';
+                this.setAnalysisTab('result');
                 this.generatingTernos = false;
                 this.message = `${result.quantity} ternos salvos. Conferência do 1º ao 5º prêmio, cotação 13.000×.`;
             },
@@ -799,6 +915,9 @@ export class AppComponent implements OnInit {
                 const generated = batch ? batch.sourcePrediction : response as GenerationResponse;
                 generated.numbers = this.sortByGroupAndMilhar(generated.numbers);
                 this.generation = generated;
+                this.expandedReasonRanks.clear();
+                this.generatorKind = 'hybrid';
+                this.setAnalysisTab('result');
                 this.generationWindowDays = generated.windowDays;
                 this.message = batch ? batch.message + ` Total do dia: ${this.money(batch.totalBetAmount)}.` : '';
                 this.generating = false;
