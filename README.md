@@ -173,6 +173,28 @@ Verificação de regressão dos formulários: execute `node tests/terno-state.cj
 - `POST /api/ai/analyze`
 - `GET /health`
 
+## Mega-Sena
+Módulo independente do jogo do bicho, com resultados, gerador de jogos, histórico, dashboard e backtest.
+
+> Cada aposta simples de 6 dezenas tem 1 chance em 50.063.860 de acertar a sena. O score apenas ordena o histórico e não muda essa probabilidade: os sorteios são independentes.
+
+**Resultados.** A tabela `megasena_draws` é criada pela API na inicialização (`MegaSenaSchema.cs`; documentada em `database/003_megasena.sql`). A fonte principal é a API da Caixa (`servicebus2.caixa.gov.br/portaldeloterias/api/megasena`), com fallback em `loteriascaixa-api.herokuapp.com`. A gravação é um upsert idempotente por concurso. O worker de cinco minutos também sincroniza o último concurso, em um bloco separado, sem afetar a sincronização do jogo do bicho. A carga histórica baixa primeiro todos os concursos em lote pela fonte alternativa e depois busca concurso a concurso o que faltar, com intervalo entre as requisições.
+
+**Gerador.** Pontua as dezenas 1–60 com os últimos `windowContests` concursos (padrão 100): frequência na janela (35%), frequência no histórico (20%), atraso (10%), momentum dos últimos 10 concursos em relação à média da janela (20%) e afinidade de pares com as dezenas mais frequentes (15%). Cada sinal é normalizado entre 0 e 1. Cada jogo usa cerca de 60% de dezenas do topo do score, 20% emergentes (melhor momentum) e 20% sorteadas do restante, de forma ponderada e com seed reproduzível. Não há jogos repetidos, dois jogos compartilham no máximo 3 dezenas e há equilíbrio básico entre pares e ímpares e entre 1–30 e 31–60. Quando isso é impossível (por exemplo, 50 jogos de 15 dezenas), as restrições são relaxadas e o relaxamento fica registrado. O custo é `C(n,6) × R$ 6,00` por jogo (`MegaSenaService.BetPrice`).
+
+**Conferência.** Jogos com 7 a 15 dezenas são avaliados como as `C(n,6)` apostas simples equivalentes: com `h` acertos, há `C(h,k)·C(n−h,6−k)` combinações com `k` acertos. O retorno usa o prêmio real por ganhador de cada faixa gravado em `megasena_draws`.
+
+**Backtest.** Walk-forward: para cada concurso, os jogos são gerados somente com os concursos anteriores. A média de acertos é comparada a jogos aleatórios com o mesmo número de dezenas e à expectativa hipergeométrica exata (`n × 6/60`), junto com um z-score aproximado.
+
+Endpoints (mesmas permissões das demais áreas):
+- `POST /api/megasena/sync-history` e `GET /api/megasena/sync-history/status` — carga histórica (`imports.write`)
+- `POST /api/megasena/sync-latest` — sincroniza o último concurso (`imports.write`)
+- `GET /api/megasena/draws?page=1` e `GET /api/megasena/draws/{contest}` (`predictions.read`)
+- `POST /api/megasena/generate` `{ targetContest?, quantity (1–50), numbersPerGame (6–15), windowContests, seed? }` (`predictions.write`)
+- `GET /api/megasena/predictions?page=1`, `GET /api/megasena/predictions/{id}` (`predictions.read`) e `POST /api/megasena/predictions/delete-batch` (`predictions.write`)
+- `GET /api/megasena/statistics` (`dashboard.read`)
+- `GET /api/megasena/backtest?contests=200&numbersPerGame=6&quantity=5` (`analysis.use`)
+
 ## Próximas evoluções recomendadas
 - OCR para PDFs escaneados.
 - Cadastro de bancas e horários.
