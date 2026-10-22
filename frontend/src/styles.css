@@ -22,3 +22,4 @@ table{display:block;width:100%;max-width:100%;margin:10px 0;overflow-x:auto;bord
 .mega-stat{display:inline-flex;align-items:center;gap:3px;margin:3px 10px 3px 0;font-size:12px;color:var(--muted)}.mega-dashboard{margin-top:18px}.mega-dashboard .dashboard-columns{grid-template-columns:repeat(3,minmax(0,1fr))}
 .mega-scores{margin-top:14px}.mega-scores summary{cursor:pointer;font-weight:600}.mega-backtest table td,.mega-backtest table th{white-space:nowrap}
 @media (max-width:760px){.mega-dashboard .dashboard-columns{grid-template-columns:1fr}.mega-ball{width:30px;height:30px;font-size:12px}}
+.mega-errors{margin:8px 0 0;padding-left:18px;color:#991b1b;font-size:12px;max-height:160px;overflow:auto}

@@ -23,12 +23,49 @@ public sealed class MegaSenaService(Db db)
         ["windowFrequency"] = 0.35, ["historyFrequency"] = 0.20, ["delay"] = 0.10, ["momentum"] = 0.20, ["pairAffinity"] = 0.15
     };
 
-    private sealed record DrawRow(int Contest, DateTime DrawDate, short[] Numbers, int SenaWinners, decimal SenaPrize,
-        int QuinaWinners, decimal QuinaPrize, int QuadraWinners, decimal QuadraPrize, bool Accumulated,
-        decimal? NextEstimate, string Source, DateTime ImportedAt);
-    private sealed record PredictionRow(Guid Id, int TargetContest, DateTime GeneratedAt, long Seed, int WindowContests,
-        int NumbersPerGame, int Quantity, decimal TotalCost, string ConfigJson, string ScoresJson, string Status);
-    private sealed record GameRow(Guid PredictionId, int Rank, short[] Numbers);
+    // Linhas lidas pelo Dapper são classes com setters: o Npgsql informa colunas smallint[] como System.Array,
+    // o que impede o Dapper de casar construtores posicionais (records/tuplas) e falha na materialização.
+    public sealed class DrawRow
+    {
+        public int Contest { get; set; }
+        public DateTime DrawDate { get; set; }
+        public short[] Numbers { get; set; } = [];
+        public int SenaWinners { get; set; }
+        public decimal SenaPrize { get; set; }
+        public int QuinaWinners { get; set; }
+        public decimal QuinaPrize { get; set; }
+        public int QuadraWinners { get; set; }
+        public decimal QuadraPrize { get; set; }
+        public bool Accumulated { get; set; }
+        public decimal? NextEstimate { get; set; }
+        public string Source { get; set; } = "";
+        public DateTime ImportedAt { get; set; }
+    }
+    public sealed class DrawNumbersRow
+    {
+        public int Contest { get; set; }
+        public short[] Numbers { get; set; } = [];
+    }
+    public sealed class PredictionRow
+    {
+        public Guid Id { get; set; }
+        public int TargetContest { get; set; }
+        public DateTime GeneratedAt { get; set; }
+        public long Seed { get; set; }
+        public int WindowContests { get; set; }
+        public int NumbersPerGame { get; set; }
+        public int Quantity { get; set; }
+        public decimal TotalCost { get; set; }
+        public string ConfigJson { get; set; } = "{}";
+        public string ScoresJson { get; set; } = "[]";
+        public string Status { get; set; } = "PENDING";
+    }
+    public sealed class GameRow
+    {
+        public Guid PredictionId { get; set; }
+        public int Rank { get; set; }
+        public short[] Numbers { get; set; } = [];
+    }
 
     public sealed record GenerationResult(List<MegaSenaGame> Games, int MaxSharedUsed, bool BalanceRelaxed);
 
@@ -207,9 +244,9 @@ public sealed class MegaSenaService(Db db)
             ?? throw new ArgumentException("Não há resultados da Mega-Sena. Faça a carga histórica primeiro.");
         var target = request.TargetContest ?? latest + 1;
         if (target < 2 || target > latest + 1) throw new ArgumentException($"O concurso alvo deve estar entre 2 e {latest + 1}.");
-        var history = (await connection.QueryAsync<short[]>(
-            "select numbers from megasena_draws where contest<@target order by contest", new { target }))
-            .Select(x => x.Select(n => (int)n).ToArray()).ToList();
+        var history = (await connection.QueryAsync<DrawNumbersRow>(
+            "select contest,numbers from megasena_draws where contest<@target order by contest", new { target }))
+            .Select(x => x.Numbers.Select(n => (int)n).ToArray()).ToList();
         if (history.Count < 10) throw new ArgumentException("São necessários pelo menos 10 concursos anteriores ao alvo.");
 
         var seed = request.Seed ?? Random.Shared.NextInt64(1, 1_000_000_000);
@@ -291,7 +328,7 @@ public sealed class MegaSenaService(Db db)
         var games = evaluated.SelectMany(x => x.Games).ToList();
         var totalBet = evaluated.Sum(x => x.Prediction.TotalCost);
         var returned = games.Sum(x => x.ReturnAmount);
-        var draws = (await connection.QueryAsync<(int Contest, short[] Numbers)>("select contest,numbers from megasena_draws order by contest")).ToList();
+        var draws = (await connection.QueryAsync<DrawNumbersRow>("select contest,numbers from megasena_draws order by contest")).ToList();
         var counts = new int[61]; var lastSeen = new int[61];
         foreach (var draw in draws) foreach (var n in draw.Numbers) { counts[n]++; lastSeen[n] = draw.Contest; }
         var latest = draws.Count == 0 ? 0 : draws[^1].Contest;
@@ -324,7 +361,7 @@ public sealed class MegaSenaService(Db db)
         numbersPerGame = Math.Clamp(numbersPerGame, 6, 15);
         windowContests = Math.Clamp(windowContests, 10, 5000);
         await using var connection = db.Open();
-        var draws = (await connection.QueryAsync<(int Contest, short[] Numbers)>("select contest,numbers from megasena_draws order by contest"))
+        var draws = (await connection.QueryAsync<DrawNumbersRow>("select contest,numbers from megasena_draws order by contest"))
             .Select(x => (x.Contest, Numbers: x.Numbers.Select(n => (int)n).ToArray())).ToList();
         if (draws.Count < 60) throw new ArgumentException("São necessários pelo menos 60 concursos importados para o backtest.");
         contests = Math.Min(contests, draws.Count - 50);

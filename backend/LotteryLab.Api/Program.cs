@@ -54,6 +54,7 @@ builder.Services.AddHttpClient<ResultFacilHistoryService>(client =>
 builder.Services.AddSingleton<MegaSenaSchema>();
 builder.Services.AddScoped<MegaSenaService>();
 builder.Services.AddSingleton<MegaSenaHistoryJobService>();
+builder.Services.AddSingleton<MegaSenaSyncState>();
 builder.Services.AddHttpClient<MegaSenaResultsService>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(60);

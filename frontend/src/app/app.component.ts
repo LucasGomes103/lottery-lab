@@ -1249,7 +1249,7 @@ export class AppComponent implements OnInit {
     private loadMegaSyncStatus() {
         this.http.get<any>(this.api + '/megasena/sync-history/status').subscribe({
             next: job => {
-                if (job.status === 'IDLE') return;
+                if (job.status === 'IDLE') { this.megaSyncJob = job.automatic?.lastAttempt ? { automatic: job.automatic } : null; return; }
                 this.megaSyncJob = job;
                 if (job.status === 'RUNNING') { this.megaSyncingHistory = true; this.pollMegaSync(); }
             },

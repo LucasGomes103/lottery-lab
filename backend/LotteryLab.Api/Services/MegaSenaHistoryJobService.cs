@@ -1,7 +1,7 @@
 namespace LotteryLab.Api.Services;
 
 // Mesmo modelo do HistorySyncJobService: estado em memória, uma carga por vez.
-public sealed class MegaSenaHistoryJobService(IServiceScopeFactory scopes)
+public sealed class MegaSenaHistoryJobService(IServiceScopeFactory scopes, MegaSenaSyncState automatic)
 {
     private sealed class Job
     {
@@ -43,19 +43,25 @@ public sealed class MegaSenaHistoryJobService(IServiceScopeFactory scopes)
             }
             catch (Exception exception)
             {
-                job.Error = exception.Message; job.CurrentStep = "Carga interrompida"; job.Status = "FAILED";
+                job.Error = MegaSenaResultsService.Describe(exception); job.CurrentStep = "Carga interrompida"; job.Status = "FAILED";
             }
             finally { job.FinishedAt = DateTimeOffset.UtcNow; }
         });
         return Snapshot(job);
     }
 
-    public object Status() => current is { } job ? Snapshot(job) : new { status = "IDLE" };
+    public object Status() => current is { } job ? Snapshot(job, automatic) : new { status = "IDLE", automatic = AutomaticSnapshot(automatic) };
 
-    private static object Snapshot(Job job) => new
+    private object Snapshot(Job job) => Snapshot(job, automatic);
+
+    private static object AutomaticSnapshot(MegaSenaSyncState state) => new { state.LastAttempt, state.LastSuccess, state.LastContest,
+        state.LastSource, state.LastError, state.LastCaixaError };
+
+    private static object Snapshot(Job job, MegaSenaSyncState state) => new
     {
         id = job.Id, status = job.Status, completed = job.Completed, total = job.Total,
         percent = job.Total == 0 ? (job.Status == "RUNNING" ? 0 : 100) : Math.Round(100d * job.Completed / job.Total, 1),
-        currentStep = job.CurrentStep, job.StartedAt, job.FinishedAt, result = job.Result, error = job.Error
+        currentStep = job.CurrentStep, job.StartedAt, job.FinishedAt, result = job.Result, error = job.Error,
+        errors = job.Result?.Errors.Take(20), automatic = AutomaticSnapshot(state)
     };
 }
