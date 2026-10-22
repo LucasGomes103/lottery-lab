@@ -11,7 +11,7 @@ public sealed record HistorySyncResult(string Bank, DateOnly Start, DateOnly End
 
 public sealed class ResultFacilHistoryService(HttpClient http, Db db, PredictionService predictions)
 {
-    private static readonly Regex Block = new(@"<h3[^>]*>(?<title>.*?)</h3>.*?<table[^>]*id=""(?<id>[^""]+)""[^>]*data-extends=""(?<data>[^""]+)""", RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex Block = new(@"<h[23][^>]*>(?<title>(?:(?!</h[23]>).)*?)</h[23]>(?:(?!<h[23][\s>]).)*?<table[^>]*id=""(?<id>[^""]+)""[^>]*data-extends=""(?<data>[^""]+)""", RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex Number = new(@"""(?<position>\d+)_(?<number>\d{4})_\d{2}""", RegexOptions.Compiled);
     private static readonly string[] Animals = ["AVESTRUZ", "AGUIA", "BURRO", "BORBOLETA", "CACHORRO", "CABRA", "CARNEIRO", "CAMELO", "COBRA", "COELHO", "CAVALO", "ELEFANTE", "GALO", "GATO", "JACARE", "LEAO", "MACACO", "PORCO", "PAVAO", "PERU", "TOURO", "TIGRE", "URSO", "VEADO", "VACA"];
 
@@ -46,20 +46,10 @@ public sealed class ResultFacilHistoryService(HttpClient http, Db db, Prediction
         var slug = bank == "LOOK LOTERIAS" ? "resultados-look-loterias" : "resultados-loteria-nacional";
         var url = $"{slug}-do-dia-{date:yyyy-MM-dd}-1ao10";
         var html = await FetchHtml(url, cancellationToken);
-        var blocks = Block.Matches(html).Cast<Match>().Select(match => new { match.Groups["title"].Value, Encoded = match.Groups["id"].Value[..^1] + match.Groups["data"].Value[1..] }).ToList();
-        if (blocks.Count == 0) throw new InvalidDataException("A página não trouxe tabelas de resultado; a data será tentada novamente.");
+        if (!Block.IsMatch(html)) throw new InvalidDataException("A página não trouxe tabelas de resultado; a data será tentada novamente.");
         await using var connection = db.Open(); var count = 0;
-        foreach (var block in blocks)
+        foreach (var (time, numbers) in ParseExtractions(html, bank))
         {
-            var title = Regex.Replace(block.Value, "<.*?>", " ");
-            var hour = Regex.Match(title, bank == "LOOK LOTERIAS" ? @"(?<h>\d{2})h" : @"LN\s+(?<h>\d{2}):");
-            if (!hour.Success) continue;
-            var encoded = Regex.Replace(WebUtility.HtmlDecode(block.Encoded), "[^A-Za-z0-9+/=]", "").TrimEnd('=');
-            encoded = encoded.PadRight(encoded.Length + (4 - encoded.Length % 4) % 4, '=');
-            var numbers = Number.Matches(Encoding.UTF8.GetString(Convert.FromBase64String(encoded))).Cast<Match>()
-                .Select(x => (Position: int.Parse(x.Groups["position"].Value), Number: x.Groups["number"].Value)).Where(x => x.Position is >= 1 and <= 10).ToList();
-            if (numbers.Count != 10) continue;
-            var time = $"{hour.Groups["h"].Value}:00";
             await using var tx = await connection.BeginTransactionAsync(cancellationToken);
             var id = await connection.ExecuteScalarAsync<long?>(@"insert into extractions(bank,extraction_date,extraction_time,source_file)
                 values(@bank,@date,@time::time,@source) on conflict(bank,extraction_date,extraction_time) do update set source_file=excluded.source_file returning id",
@@ -76,6 +66,27 @@ public sealed class ResultFacilHistoryService(HttpClient http, Db db, Prediction
         }
         if (count == 0) throw new InvalidDataException("Nenhum horário com 10 prêmios foi encontrado; a data será tentada novamente.");
         return count;
+    }
+
+    // Cada título (h2 no layout atual, h3 no antigo) é pareado só com a tabela anterior ao próximo título.
+    public static List<(string Time, List<(int Position, string Number)> Numbers)> ParseExtractions(string html, string bank)
+    {
+        var extractions = new List<(string, List<(int, string)>)>();
+        foreach (Match block in Block.Matches(html))
+        {
+            var title = WebUtility.HtmlDecode(Regex.Replace(block.Groups["title"].Value, "<.*?>", " "));
+            if (title.Contains("FEDERAL", StringComparison.OrdinalIgnoreCase)) continue;
+            var hour = Regex.Match(title, bank == "LOOK LOTERIAS" ? @"(?<h>\d{2})h\b" : @"LN\s+(?<h>\d{2}):");
+            if (!hour.Success) continue;
+            var raw = block.Groups["id"].Value[..^1] + block.Groups["data"].Value[1..];
+            var encoded = Regex.Replace(WebUtility.HtmlDecode(raw), "[^A-Za-z0-9+/=]", "").TrimEnd('=');
+            encoded = encoded.PadRight(encoded.Length + (4 - encoded.Length % 4) % 4, '=');
+            var numbers = Number.Matches(Encoding.UTF8.GetString(Convert.FromBase64String(encoded))).Cast<Match>()
+                .Select(x => (Position: int.Parse(x.Groups["position"].Value), Number: x.Groups["number"].Value)).Where(x => x.Position is >= 1 and <= 10).ToList();
+            if (numbers.Count != 10) continue;
+            extractions.Add(($"{hour.Groups["h"].Value}:00", numbers));
+        }
+        return extractions;
     }
 
     private async Task<bool> IsDateComplete(string bank, DateOnly date)

@@ -177,9 +177,25 @@ public sealed class ExternalResultsWorker(IServiceScopeFactory scopeFactory, ILo
                 var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, zone).DateTime);
                 await service.Sync(today, stoppingToken);
                 await service.SyncLook(today, stoppingToken);
+                await CatchUpPreviousDays(scope.ServiceProvider.GetRequiredService<ResultFacilHistoryService>(), today, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception) { logger.LogWarning(exception, "Sincronização automática será tentada novamente."); }
         } while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+
+    // Recupera horários que faltaram nos últimos 7 dias; dias já completos não geram requisição à fonte.
+    private async Task CatchUpPreviousDays(ResultFacilHistoryService history, DateOnly today, CancellationToken stoppingToken)
+    {
+        foreach (var bank in new[] { "LT NACIONAL", "LOOK LOTERIAS" })
+        {
+            try
+            {
+                var result = await history.Sync(bank, today.AddDays(-7), today.AddDays(-1), stoppingToken, onlyMissingDates: true);
+                if (result.Errors.Count > 0) logger.LogWarning("Recuperação de {Bank} com falhas: {Errors}", bank, string.Join("; ", result.Errors));
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
+            catch (Exception exception) { logger.LogWarning(exception, "Falha ao recuperar dias anteriores de {Bank}.", bank); }
+        }
     }
 }
