@@ -33,6 +33,7 @@ builder.Services.AddScoped<AnalysisService>();
 builder.Services.AddScoped<AiService>();
 builder.Services.AddScoped<NumberGeneratorService>();
 builder.Services.AddScoped<PredictionService>();
+builder.Services.AddScoped<RandomnessService>();
 builder.Services.AddSingleton<DecisionBatteryJobService>();
 builder.Services.AddSingleton<HistorySyncJobService>();
 builder.Services.AddSingleton<ExternalResultsState>();

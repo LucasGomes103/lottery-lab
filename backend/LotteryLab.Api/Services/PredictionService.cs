@@ -706,11 +706,11 @@ public sealed partial class PredictionService(Db db)
     // before the result being checked and the final fifth is kept as an untouched test set.
     public async Task<object> DecisionBattery(string bank, int quantity, decimal betAmount,
         decimal dezenaPayout, decimal centenaPayout, decimal milharPayout, int prizeRange = 5, int maxEvaluations = 500,
-        Action<int, int>? reportProgress = null)
+        Action<int, int>? reportProgress = null, DateOnly? testFrom = null)
     {
         quantity = Math.Clamp(quantity, 1, 10_000);
         prizeRange = Math.Clamp(prizeRange, 1, 10);
-        maxEvaluations = Math.Clamp(maxEvaluations, 100, 3000);
+        maxEvaluations = Math.Clamp(maxEvaluations, 100, MaxBatteryEvaluations);
         await using var connection = db.Open();
         var rows = (await connection.QueryAsync<Row>(@"select e.id as ExtractionId,e.extraction_date as Date,
                     e.extraction_time as Time,r.position as Position,r.number as Number
@@ -727,7 +727,7 @@ public sealed partial class PredictionService(Db db)
 
         var start = Math.Max(firstTestable, extractions.Count - maxEvaluations);
         var planned = extractions.Count - start;
-        var trials = new List<(string Model, decimal Net, decimal Return, int M, int C, int D)>();
+        var trials = new List<(string Model, decimal Net, decimal Return, int M, int C, int D, DateTime Date, decimal Expected)>();
         for (var i = start; i < extractions.Count; i++)
         {
             var target = extractions[i];
@@ -740,59 +740,82 @@ public sealed partial class PredictionService(Db db)
                 var ranked = Score(history, TimeOnly.FromTimeSpan(target.Time), [], model == "V3");
                 var seed = StableSeed($"battery:{model}:{bank}:{target.Date:yyyy-MM-dd}:{target.Time}:{window}:{quantity}");
                 var picks = Select(ranked, quantity, seed, false).Select(x => x.Milhar).ToList();
-                AddTrial(model, picks, target.Numbers);
+                AddTrial(model, picks, target.Numbers, target.Date);
             }
             var random = new Random(unchecked((int)StableSeed($"battery:random:{bank}:{target.Date:yyyy-MM-dd}:{target.Time}:{quantity}")));
-            AddTrial("ALEATÓRIO", Enumerable.Range(0, 10_000).OrderBy(_ => random.Next()).Take(quantity).Select(x => x.ToString("0000")).ToList(), target.Numbers);
+            AddTrial("ALEATÓRIO", Enumerable.Range(0, 10_000).OrderBy(_ => random.Next()).Take(quantity).Select(x => x.ToString("0000")).ToList(), target.Numbers, target.Date);
             reportProgress?.Invoke(i - start + 1, planned);
         }
 
-        void AddTrial(string model, List<string> picks, List<string> actual)
+        void AddTrial(string model, List<string> picks, List<string> actual, DateTime date)
         {
             var m = picks.Sum(p => actual.Count(a => a == p));
             var c = picks.Sum(p => actual.Count(a => a.EndsWith(p[^3..], StringComparison.Ordinal)));
             var d = picks.Sum(p => actual.Count(a => a.EndsWith(p[^2..], StringComparison.Ordinal)));
             var returned = d * dezenaPayout + c * centenaPayout + m * milharPayout;
-            trials.Add((model, returned - betAmount, returned, m, c, d));
+            // Cada par (número apostado, prêmio) acerta dezena, centena e milhar com 1/100, 1/1000 e 1/10000.
+            var expected = picks.Count * actual.Count * (dezenaPayout / 100m + centenaPayout / 1000m + milharPayout / 10000m);
+            trials.Add((model, returned - betAmount, returned, m, c, d, date, expected));
         }
 
+        var testStart = testFrom?.ToDateTime(TimeOnly.MinValue);
+        List<T> TestSlice<T>(List<T> all, Func<T, DateTime> date) =>
+            testStart is null ? all.Skip((int)Math.Floor(all.Count * .8)).ToList() : all.Where(x => date(x) >= testStart).ToList();
+        // Dois modelos comparados ao mesmo tempo: Bonferroni com alfa 0,05/2 bilateral.
+        const double bonferroniZ = 2.241;
         var modelRows = new List<object>();
+        var passing = new List<string>();
+        var smallestTest = int.MaxValue;
         foreach (var model in new[] { "V2", "V3", "ALEATÓRIO" })
         {
             var all = trials.Where(x => x.Model == model).ToList();
-            var test = all.Skip((int)Math.Floor(all.Count * .8)).ToList();
-            var randomTest = trials.Where(x => x.Model == "ALEATÓRIO").Skip((int)Math.Floor(all.Count * .8)).ToList();
+            var test = TestSlice(all, x => x.Date);
+            var randomTest = testStart is null
+                ? trials.Where(x => x.Model == "ALEATÓRIO").Skip((int)Math.Floor(all.Count * .8)).ToList()
+                : trials.Where(x => x.Model == "ALEATÓRIO" && x.Date >= testStart).ToList();
             var differences = test.Zip(randomTest, (a, b) => (double)(a.Net - b.Net)).ToList();
             var mean = differences.DefaultIfEmpty().Average();
             var sd = differences.Count < 2 ? 0 : Math.Sqrt(differences.Sum(x => Math.Pow(x - mean, 2)) / (differences.Count - 1));
             var margin = differences.Count < 2 ? 0 : 1.96 * sd / Math.Sqrt(differences.Count);
-            decimal Cost(IEnumerable<(string Model, decimal Net, decimal Return, int M, int C, int D)> data) => data.Count() * betAmount;
+            var excess = test.Select(x => (double)(x.Return - x.Expected)).ToList();
+            var excessMean = excess.DefaultIfEmpty().Average();
+            var excessSd = excess.Count < 2 ? 0 : Math.Sqrt(excess.Sum(x => Math.Pow(x - excessMean, 2)) / (excess.Count - 1));
+            var excessMargin = excess.Count < 2 ? 0 : bonferroniZ * excessSd / Math.Sqrt(excess.Count);
+            decimal Cost<T>(ICollection<T> data) => data.Count * betAmount;
+            var testRoi = Cost(test) == 0 ? 0 : Math.Round(100 * test.Sum(x => x.Net) / Cost(test), 2);
+            if (model != "ALEATÓRIO")
+            {
+                smallestTest = Math.Min(smallestTest, test.Count);
+                if (testRoi > 0 && excessMean - excessMargin > 0) passing.Add(model);
+            }
             modelRows.Add(new {
                 model, trials = all.Count, testTrials = test.Count,
                 milharHits = all.Sum(x => x.M), centenaHits = all.Sum(x => x.C), dezenaHits = all.Sum(x => x.D),
                 totalBet = Cost(all), totalReturn = all.Sum(x => x.Return), net = all.Sum(x => x.Net),
                 roiPercent = Cost(all) == 0 ? 0 : Math.Round(100 * all.Sum(x => x.Net) / Cost(all), 2),
+                expectedRoiPercent = Cost(all) == 0 ? 0 : Math.Round(100 * (all.Sum(x => x.Expected) - Cost(all)) / Cost(all), 2),
                 testNet = test.Sum(x => x.Net),
-                testRoiPercent = Cost(test) == 0 ? 0 : Math.Round(100 * test.Sum(x => x.Net) / Cost(test), 2),
+                testRoiPercent = testRoi,
+                testExpectedRoiPercent = Cost(test) == 0 ? 0 : Math.Round(100 * (test.Sum(x => x.Expected) - Cost(test)) / Cost(test), 2),
+                excessVsExpectedPerTrial = Math.Round(excessMean, 2),
+                excessConfidenceLow = Math.Round(excessMean - excessMargin, 2), excessConfidenceHigh = Math.Round(excessMean + excessMargin, 2),
                 deltaVsRandomPerTrial = Math.Round(mean, 2), confidence95Low = Math.Round(mean - margin, 2), confidence95High = Math.Round(mean + margin, 2)
             });
         }
-        var v3 = trials.Where(x => x.Model == "V3").ToList();
-        var v3Test = v3.Skip((int)Math.Floor(v3.Count * .8)).ToList();
-        var randomTestForDecision = trials.Where(x => x.Model == "ALEATÓRIO").Skip((int)Math.Floor(v3.Count * .8)).ToList();
-        var diff = v3Test.Zip(randomTestForDecision, (a, b) => (double)(a.Net - b.Net)).ToList();
-        var avg = diff.DefaultIfEmpty().Average(); var std = diff.Count < 2 ? 0 : Math.Sqrt(diff.Sum(x => Math.Pow(x - avg, 2)) / (diff.Count - 1));
-        var lower = avg - (diff.Count < 2 ? 0 : 1.96 * std / Math.Sqrt(diff.Count));
-        var testCost = v3Test.Count * betAmount;
-        var v3TestRoi = testCost == 0 ? 0 : 100 * v3Test.Sum(x => x.Net) / testCost;
-        var decision = v3Test.Count < 100 ? "AMOSTRA INSUFICIENTE" : v3TestRoi > 0 && lower > 0
-            ? "SINAL POSITIVO — MANTER SOMENTE EM TESTE CONTROLADO" : "SEM EVIDÊNCIA DE VANTAGEM — REDUZIR OU PAUSAR EXPOSIÇÃO";
+        var decision = smallestTest < 100 ? "AMOSTRA INSUFICIENTE" : passing.Count > 0
+            ? $"SINAL POSITIVO ({string.Join(", ", passing)}) — MANTER SOMENTE EM TESTE CONTROLADO" : "SEM EVIDÊNCIA DE VANTAGEM — REDUZIR OU PAUSAR EXPOSIÇÃO";
         return new { bank, availableExtractions = extractions.Count, evaluatedExtractions = trials.Count / 3,
             period = new { from = extractions[start].Date, to = extractions[^1].Date }, quantity, prizeRange, betAmount, dezenaPayout, centenaPayout, milharPayout,
-            models = modelRows, decision, methodology = "Walk-forward cronológico. Cada previsão usa somente resultados anteriores; V2 usa janela fixa de 90 dias, V3 usa a janela recomendada por horário. O último 20% é teste final. Aleatório recebe a mesma quantidade de números e cotações.",
-            interpretation = "O intervalo de 95% mede a diferença média de saldo por previsão contra o aleatório no teste. Se ele inclui zero, não há evidência estatística de superioridade.",
+            testFrom, testPeriodFrom = testStart ?? trials.Where(x => x.Model == "V3").Select(x => x.Date).Skip((int)Math.Floor(trials.Count(x => x.Model == "V3") * .8)).DefaultIfEmpty().First(),
+            confidenceZ = bonferroniZ, models = modelRows, decision,
+            methodology = "Walk-forward cronológico. Cada previsão usa somente resultados anteriores; V2 usa janela fixa de 90 dias, V3 usa a janela recomendada por horário. " +
+                (testStart is null ? "O último 20% é teste final." : $"O teste final são as extrações a partir de {testFrom:dd/MM/yyyy}.") +
+                " Aleatório recebe a mesma quantidade de números e cotações. O retorno esperado vem da probabilidade teórica de cada modalidade em sorteio uniforme.",
+            interpretation = "O intervalo do excesso sobre o esperado usa z=2,241 (Bonferroni para V2 e V3). Se ele inclui zero, o modelo não se distingue de apostar ao acaso. O intervalo contra o aleatório (95%) é mantido para comparação com execuções anteriores.",
             warning = "Esta bateria avalia desempenho histórico e não torna sorteios independentes previsíveis nem garante retorno futuro." };
     }
+
+    public const int MaxBatteryEvaluations = 3000;
 
     private static List<Scored> Score(List<Row> rows, TimeOnly targetTime, Dictionary<string, int> priorAppearances, bool v3 = true)
     {

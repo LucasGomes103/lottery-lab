@@ -13,7 +13,7 @@ namespace LotteryLab.Api.Controllers;
 [Authorize]
 public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService analysis, AiService ai,
     NumberGeneratorService generator, PredictionService predictions, DecisionBatteryJobService decisionBatteryJobs,
-    ExternalResultsService externalResults, HistorySyncJobService historySyncJobs) : ControllerBase
+    ExternalResultsService externalResults, HistorySyncJobService historySyncJobs, RandomnessService randomness) : ControllerBase
 {
     [HttpPost("imports/preview")]
     [Authorize(Policy = Permissions.ImportsWrite)]
@@ -465,24 +465,32 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     [Authorize(Policy = Permissions.AnalysisUse)]
     public async Task<IActionResult> PredictionDecisionBattery(string bank = "LT NACIONAL", int quantity = 8,
         decimal betAmount = 30m, decimal dezenaPayout = 8.57m, decimal centenaPayout = 57.14m,
-        decimal milharPayout = 296.30m, int prizeRange = 5, int maxEvaluations = 3000)
+        decimal milharPayout = 296.30m, int prizeRange = 5, int maxEvaluations = 3000, DateOnly? testFrom = null)
     {
         if (!IsNational(bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
         return Ok(await predictions.DecisionBattery(bank.Trim(), quantity, Math.Clamp(betAmount, 0m, 1_000_000m),
             Math.Clamp(dezenaPayout, 0m, 1_000_000m), Math.Clamp(centenaPayout, 0m, 1_000_000m),
-            Math.Clamp(milharPayout, 0m, 1_000_000m), Math.Clamp(prizeRange, 1, 10), maxEvaluations));
+            Math.Clamp(milharPayout, 0m, 1_000_000m), Math.Clamp(prizeRange, 1, 10), maxEvaluations, testFrom: testFrom));
     }
 
     [HttpPost("predictions/decision-battery/jobs")]
     [Authorize(Policy = Permissions.AnalysisUse)]
     public IActionResult StartPredictionDecisionBattery(string bank = "LT NACIONAL", int quantity = 8,
         decimal betAmount = 30m, decimal dezenaPayout = 8.57m, decimal centenaPayout = 57.14m,
-        decimal milharPayout = 296.30m, int prizeRange = 5, int maxEvaluations = 3000)
+        decimal milharPayout = 296.30m, int prizeRange = 5, int maxEvaluations = 3000, DateOnly? testFrom = null)
     {
         if (!IsNational(bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
         return Accepted(decisionBatteryJobs.Start(bank.Trim(), Math.Clamp(quantity, 1, 100), Math.Clamp(betAmount, 0m, 1_000_000m),
             Math.Clamp(dezenaPayout, 0m, 1_000_000m), Math.Clamp(centenaPayout, 0m, 1_000_000m),
-            Math.Clamp(milharPayout, 0m, 1_000_000m), Math.Clamp(prizeRange, 1, 10), maxEvaluations));
+            Math.Clamp(milharPayout, 0m, 1_000_000m), Math.Clamp(prizeRange, 1, 10), maxEvaluations, testFrom));
+    }
+
+    [HttpGet("analysis/randomness")]
+    [Authorize(Policy = Permissions.AnalysisUse)]
+    public async Task<IActionResult> Randomness(string bank = "LT NACIONAL", int prizeRange = 5)
+    {
+        if (!IsNational(bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
+        return Ok(await randomness.Run(bank.Trim(), Math.Clamp(prizeRange, 1, 10)));
     }
 
     [HttpGet("predictions/decision-battery/jobs/{id:guid}")]
