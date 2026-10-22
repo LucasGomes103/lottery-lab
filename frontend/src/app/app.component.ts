@@ -902,6 +902,22 @@ export class AppComponent implements OnInit {
         return Math.round(Math.max(0, Number(this.betAmount) || 0) * 0.9 * 100) / 100;
     }
 
+    barPercent(value: number | null | undefined, rows: any[] | null | undefined) {
+        const max = Math.max(0, ...(rows || []).map(row => Math.abs(Number(row.profit_amount) || 0)));
+        return max ? Math.round(Math.abs(Number(value) || 0) / max * 100) : 0;
+    }
+
+    private chronologicalSource: any[] | null = null;
+    private chronologicalRows: any[] = [];
+
+    chronological(rows: any[] | null | undefined) {
+        if (rows !== this.chronologicalSource) {
+            this.chronologicalSource = rows || null;
+            this.chronologicalRows = [...(rows || [])].sort((a, b) => String(a.target_date).localeCompare(String(b.target_date)));
+        }
+        return this.chronologicalRows;
+    }
+
     money(value: number | null | undefined) {
         return (Number(value) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     }
