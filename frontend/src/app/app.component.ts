@@ -2,7 +2,7 @@ import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { forkJoin } from 'rxjs';
+import { forkJoin, TimeoutError, timeout } from 'rxjs';
 
 interface ParsedResult { position: number; number: string; milhar: string | null; centena: string | null; dezena: string | null; group: number | null; animal: string | null; }
 interface ParsedExtraction { date: string | null; bank: string; time: string | null; results: ParsedResult[]; warnings: string[]; }
@@ -756,7 +756,8 @@ export class AppComponent implements OnInit {
             dezenaStake: this.dezenaStake, centenaStake: this.centenaStake, milharStake: this.milharStake,
             groups: Array.from(this.selectedAnimalGroups) };
         const endpoint = this.generateForAllBankTimes ? '/predictions/generate-bank-day' : '/predictions/generate';
-        this.http.post<GenerationResponse | BankDayGenerationResponse>(this.api + endpoint, payload).subscribe({
+        // Sem resposta em 3 minutos o botão é liberado, em vez de ficar em "Calculando..." para sempre.
+        this.http.post<GenerationResponse | BankDayGenerationResponse>(this.api + endpoint, payload).pipe(timeout(180000)).subscribe({
             next: response => {
                 const batch = this.generateForAllBankTimes ? response as BankDayGenerationResponse : null;
                 const generated = batch ? batch.sourcePrediction : response as GenerationResponse;
@@ -766,7 +767,12 @@ export class AppComponent implements OnInit {
                 this.message = batch ? batch.message + ` Total do dia: ${this.money(batch.totalBetAmount)}.` : '';
                 this.generating = false;
             },
-            error: error => { this.error = this.errorMessage(error); this.generating = false; }
+            error: error => {
+                this.error = error instanceof TimeoutError
+                    ? 'O servidor demorou mais de 3 minutos para gerar a previsão. Tente novamente em instantes.'
+                    : this.errorMessage(error);
+                this.generating = false;
+            }
         });
     }
 
