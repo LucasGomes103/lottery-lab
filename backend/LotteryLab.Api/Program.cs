@@ -59,8 +59,16 @@ builder.Services.AddCors(o => o.AddPolicy("web", p => p.WithOrigins(origins).All
 var app = builder.Build();
 await app.Services.GetRequiredService<PredictionSchema>().Initialize();
 await app.Services.GetRequiredService<AuthSchema>().Initialize();
-await using (var scope = app.Services.CreateAsyncScope())
-    await scope.ServiceProvider.GetRequiredService<PredictionService>().ReevaluateAll();
+// A reavaliação roda em segundo plano para a API responder logo após o deploy ou o cold start.
+app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
+{
+    try
+    {
+        await using var scope = app.Services.CreateAsyncScope();
+        await scope.ServiceProvider.GetRequiredService<PredictionService>().ReevaluateAll();
+    }
+    catch (Exception error) { app.Logger.LogError(error, "Falha ao reavaliar previsões na inicialização."); }
+}));
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 app.UseRouting();
 app.UseCors("web");

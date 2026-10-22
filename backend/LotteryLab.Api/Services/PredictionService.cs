@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -5,6 +6,7 @@ using System.Text.RegularExpressions;
 using Dapper;
 using LotteryLab.Api.Data;
 using LotteryLab.Api.Models;
+using Npgsql;
 
 namespace LotteryLab.Api.Services;
 
@@ -31,6 +33,8 @@ public sealed partial class PredictionService(Db db)
         decimal CentenaPayout, decimal MilharPayout, int PrizeRange);
     private sealed record DailyWindowChoice(int WindowDays, int EvaluatedDays, int MilharHits, int CentenaHits,
         int DezenaHits, string Methodology);
+    // A janela diária só depende de resultados anteriores ao dia alvo, então pode ser reaproveitada entre cliques.
+    private static readonly ConcurrentDictionary<(string Bank, DateOnly Date, int Quantity, TimeOnly BaseTime), DailyWindowChoice> DailyWindowCache = new();
 
     public Task<PredictionResponse> GenerateAndSave(PredictionRequest request) => GenerateAndSaveInternal(request);
 
@@ -113,16 +117,7 @@ public sealed partial class PredictionService(Db db)
                 quantity, seed, sampleExtractions, sampleResults = rows.Count, robustness,
                 config = JsonSerializer.Serialize(composition, JsonOptions), betAmount, dezenaPayout, centenaPayout, milharPayout,
                 prizeRange, dezenaStake, centenaStake, milharStake }, transaction);
-        foreach (var candidate in selected)
-            await connection.ExecuteAsync(
-                @"insert into prediction_candidates(prediction_id,rank,milhar,centena,dezena,group_no,
-                    selection_type,statistical_score,final_score,features,reasons)
-                  values(@id,@Rank,@Milhar,@Centena,@Dezena,@Group,@SelectionType,@StatisticalScore,@FinalScore,
-                    @features::jsonb,@reasons::jsonb)",
-                new { id, candidate.Rank, candidate.Milhar, candidate.Centena, candidate.Dezena, candidate.Group,
-                    candidate.SelectionType, candidate.StatisticalScore, candidate.FinalScore,
-                    features = JsonSerializer.Serialize(candidate.Features, JsonOptions),
-                    reasons = JsonSerializer.Serialize(candidate.Reasons, JsonOptions) }, transaction);
+        await InsertCandidates(connection, transaction, id, selected);
         await transaction.CommitAsync();
         await EvaluatePending(bank, date, targetTime.ToString("HH:mm"));
 
@@ -161,6 +156,8 @@ public sealed partial class PredictionService(Db db)
     private async Task<DailyWindowChoice> RecommendDailyWindow(string bank, DateOnly targetDate, int quantity, TimeOnly baseTime)
     {
         quantity = Math.Clamp(quantity, 1, 10_000);
+        var cacheKey = (bank.ToUpperInvariant(), targetDate, quantity, baseTime);
+        if (DailyWindowCache.TryGetValue(cacheKey, out var cached)) return cached;
         var candidateWindows = new[] { 30, 60, 90, 120, 180, 240 };
         await using var connection = db.Open();
         // Os dias avaliados vêm do banco; assim o histórico carregado se limita ao que as janelas realmente usam.
@@ -187,28 +184,34 @@ public sealed partial class PredictionService(Db db)
                 targetDate = targetDate.ToDateTime(TimeOnly.MinValue)
             })).ToList();
 
-        var comparisons = new List<DailyWindowChoice>();
-        foreach (var window in candidateWindows)
+        // Cada par janela/dia é independente e tem semente própria; rodar em paralelo não altera o resultado.
+        var hits = new (int Milhar, int Centena, int Dezena)[candidateWindows.Length, dates.Count];
+        Parallel.For(0, candidateWindows.Length * dates.Count, index =>
         {
-            var milharHits = 0; var centenaHits = 0; var dezenaHits = 0;
-            foreach (var date in dates)
-            {
-                var historyStart = date.AddDays(-window).ToDateTime(TimeOnly.MinValue);
-                var historyEnd = date.ToDateTime(TimeOnly.MinValue);
-                var history = rows.Where(x => x.Date < historyEnd && x.Date >= historyStart).ToList();
-                if (history.Count == 0) continue;
-                var seed = StableSeed($"daily-window:{bank}:{date:yyyy-MM-dd}:{window}:{quantity}");
-                var picks = Select(Score(history, baseTime, [], true), quantity, seed, false);
-                var actual = rows.Where(x => x.Date.Date == historyEnd).Select(x => x.Number.PadLeft(4, '0')[^4..]).ToList();
-                milharHits += picks.Sum(pick => actual.Count(number => number == pick.Milhar));
-                centenaHits += picks.Sum(pick => actual.Count(number => number.EndsWith(pick.Centena, StringComparison.Ordinal)));
-                dezenaHits += picks.Sum(pick => actual.Count(number => number.EndsWith(pick.Dezena, StringComparison.Ordinal)));
-            }
-            comparisons.Add(new DailyWindowChoice(window, dates.Count, milharHits, centenaHits, dezenaHits,
-                "Walk-forward diário: uma única lista é gerada antes do primeiro horário e confrontada com todos os resultados disponíveis do dia."));
-        }
-        return comparisons.OrderByDescending(x => x.MilharHits).ThenByDescending(x => x.CentenaHits)
+            var window = candidateWindows[index / dates.Count]; var date = dates[index % dates.Count];
+            var historyStart = date.AddDays(-window).ToDateTime(TimeOnly.MinValue);
+            var historyEnd = date.ToDateTime(TimeOnly.MinValue);
+            var history = rows.Where(x => x.Date < historyEnd && x.Date >= historyStart).ToList();
+            if (history.Count == 0) return;
+            var seed = StableSeed($"daily-window:{bank}:{date:yyyy-MM-dd}:{window}:{quantity}");
+            var picks = Select(Score(history, baseTime, [], true, explain: false), quantity, seed, false);
+            var actual = rows.Where(x => x.Date.Date == historyEnd).Select(x => x.Number.PadLeft(4, '0')[^4..]).ToList();
+            hits[index / dates.Count, index % dates.Count] = (
+                picks.Sum(pick => actual.Count(number => number == pick.Milhar)),
+                picks.Sum(pick => actual.Count(number => number.EndsWith(pick.Centena, StringComparison.Ordinal))),
+                picks.Sum(pick => actual.Count(number => number.EndsWith(pick.Dezena, StringComparison.Ordinal))));
+        });
+        var comparisons = candidateWindows.Select((window, w) =>
+        {
+            var row = Enumerable.Range(0, dates.Count).Select(d => hits[w, d]).ToList();
+            return new DailyWindowChoice(window, dates.Count, row.Sum(x => x.Milhar), row.Sum(x => x.Centena), row.Sum(x => x.Dezena),
+                "Walk-forward diário: uma única lista é gerada antes do primeiro horário e confrontada com todos os resultados disponíveis do dia.");
+        }).ToList();
+        var choice = comparisons.OrderByDescending(x => x.MilharHits).ThenByDescending(x => x.CentenaHits)
             .ThenByDescending(x => x.DezenaHits).ThenBy(x => Math.Abs(x.WindowDays - 180)).First();
+        if (DailyWindowCache.Count > 200) DailyWindowCache.Clear();
+        DailyWindowCache[cacheKey] = choice;
+        return choice;
     }
 
     private async Task<PredictionResponse> SaveCopiedPrediction(PredictionResponse source, string targetTime)
@@ -239,20 +242,36 @@ public sealed partial class PredictionService(Db db)
                 robustness = source.Robustness, config = JsonSerializer.Serialize(composition, JsonOptions), source.BetAmount,
                 source.DezenaPayout, source.CentenaPayout, source.MilharPayout, source.PrizeRange,
                 source.DezenaStake, source.CentenaStake, source.MilharStake }, transaction);
-        foreach (var candidate in source.Numbers)
-            await connection.ExecuteAsync(
-                @"insert into prediction_candidates(prediction_id,rank,milhar,centena,dezena,group_no,
-                    selection_type,statistical_score,final_score,features,reasons)
-                  values(@id,@rank,@milhar,@centena,@dezena,@group,@selectionType,@statisticalScore,@finalScore,
-                    @features::jsonb,@reasons::jsonb)",
-                new { id, candidate.Rank, candidate.Milhar, candidate.Centena, candidate.Dezena, candidate.Group,
-                    candidate.SelectionType, candidate.StatisticalScore, candidate.FinalScore,
-                    features = JsonSerializer.Serialize(candidate.Features, JsonOptions),
-                    reasons = JsonSerializer.Serialize(candidate.Reasons, JsonOptions) }, transaction);
+        await InsertCandidates(connection, transaction, id, source.Numbers);
         await transaction.CommitAsync();
         await EvaluatePending(source.Bank, source.TargetDate, targetTime);
         return source with { Id = id, Time = targetTime, RandomSeed = seed, Composition = composition };
     }
+
+    // Um único insert com arrays evita uma ida ao banco por número gerado.
+    private static Task InsertCandidates(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid id,
+        IReadOnlyCollection<PredictionCandidate> candidates) =>
+        connection.ExecuteAsync(
+            @"insert into prediction_candidates(prediction_id,rank,milhar,centena,dezena,group_no,
+                selection_type,statistical_score,final_score,features,reasons)
+              select @id,x.rank,x.milhar,x.centena,x.dezena,x.group_no,x.selection_type,x.statistical_score,x.final_score,
+                x.features::jsonb,x.reasons::jsonb
+              from unnest(@ranks,@milhares,@centenas,@dezenas,@groups,@types,@statisticalScores,@finalScores,@features,@reasons)
+                as x(rank,milhar,centena,dezena,group_no,selection_type,statistical_score,final_score,features,reasons)",
+            new
+            {
+                id,
+                ranks = candidates.Select(x => x.Rank).ToArray(),
+                milhares = candidates.Select(x => x.Milhar).ToArray(),
+                centenas = candidates.Select(x => x.Centena).ToArray(),
+                dezenas = candidates.Select(x => x.Dezena).ToArray(),
+                groups = candidates.Select(x => x.Group).ToArray(),
+                types = candidates.Select(x => x.SelectionType).ToArray(),
+                statisticalScores = candidates.Select(x => x.StatisticalScore).ToArray(),
+                finalScores = candidates.Select(x => x.FinalScore).ToArray(),
+                features = candidates.Select(x => JsonSerializer.Serialize(x.Features, JsonOptions)).ToArray(),
+                reasons = candidates.Select(x => JsonSerializer.Serialize(x.Reasons, JsonOptions)).ToArray()
+            }, transaction);
 
     public async Task<PredictionResponse> SaveManual(ManualPredictionRequest request)
     {
@@ -285,11 +304,7 @@ public sealed partial class PredictionService(Db db)
                 @betAmount,@dezenaPayout,@centenaPayout,@milharPayout,@prizeRange,@dezenaStake,@centenaStake,@milharStake)",
             new { id, bank, date = request.TargetDate.ToDateTime(TimeOnly.MinValue), time = targetTime.ToString("HH:mm"), quantity = milhares.Count, seed,
                 config = JsonSerializer.Serialize(composition, JsonOptions), betAmount, dezenaPayout, centenaPayout, milharPayout, prizeRange, dezenaStake, centenaStake, milharStake }, transaction);
-        foreach (var candidate in candidates)
-            await connection.ExecuteAsync(@"insert into prediction_candidates(prediction_id,rank,milhar,centena,dezena,group_no,selection_type,statistical_score,final_score,features,reasons)
-                values(@id,@Rank,@Milhar,@Centena,@Dezena,@Group,@SelectionType,@StatisticalScore,@FinalScore,@features::jsonb,@reasons::jsonb)",
-                new { id, candidate.Rank, candidate.Milhar, candidate.Centena, candidate.Dezena, candidate.Group, candidate.SelectionType,
-                    candidate.StatisticalScore, candidate.FinalScore, features = JsonSerializer.Serialize(candidate.Features, JsonOptions), reasons = JsonSerializer.Serialize(candidate.Reasons, JsonOptions) }, transaction);
+        await InsertCandidates(connection, transaction, id, candidates);
         await transaction.CommitAsync();
         await EvaluatePending(bank, request.TargetDate, targetTime.ToString("HH:mm"));
         return new PredictionResponse(id, "MANUAL_BET", 1, bank, targetTime.ToString("HH:mm"), request.TargetDate, 0, milhares.Count, seed, 0, 0, "MANUAL",
@@ -683,7 +698,7 @@ public sealed partial class PredictionService(Db db)
                     new { bank, time = targetTime.ToString("HH:mm"), date = target.Date }))
                     .GroupBy(x => x).ToDictionary(x => x.Key, x => x.Count());
                 var seed = StableSeed($"{Algorithm}:{Version}:{bank}:{date:yyyy-MM-dd}:{targetTime:HH:mm}:{windowDays}:{quantity}:ALL");
-                var selected = Select(Score(rows, targetTime, priorAppearances), quantity, seed, false);
+                var selected = Select(Score(rows, targetTime, priorAppearances, explain: false), quantity, seed, false);
                 var actual = (await connection.QueryAsync<string>(
                     @"select r.number from results r join extractions e on e.id=r.extraction_id
                       where e.bank=@bank and e.extraction_date=@date and e.extraction_time=@time::time
@@ -737,7 +752,7 @@ public sealed partial class PredictionService(Db db)
                 var window = model == "V3" ? RecommendedWindow(TimeOnly.FromTimeSpan(target.Time)) : 90;
                 var history = rows.Where(x => x.Date.Add(x.Time) < timestamp && x.Date >= target.Date.AddDays(-window)).ToList();
                 if (history.Count == 0) continue;
-                var ranked = Score(history, TimeOnly.FromTimeSpan(target.Time), [], model == "V3");
+                var ranked = Score(history, TimeOnly.FromTimeSpan(target.Time), [], model == "V3", explain: false);
                 var seed = StableSeed($"battery:{model}:{bank}:{target.Date:yyyy-MM-dd}:{target.Time}:{window}:{quantity}");
                 var picks = Select(ranked, quantity, seed, false).Select(x => x.Milhar).ToList();
                 AddTrial(model, picks, target.Numbers, target.Date);
@@ -817,7 +832,8 @@ public sealed partial class PredictionService(Db db)
 
     public const int MaxBatteryEvaluations = 3000;
 
-    private static List<Scored> Score(List<Row> rows, TimeOnly targetTime, Dictionary<string, int> priorAppearances, bool v3 = true)
+    private static List<Scored> Score(List<Row> rows, TimeOnly targetTime, Dictionary<string, int> priorAppearances, bool v3 = true,
+        bool explain = true)
     {
         if (rows.Count == 0) return [];
         var extractions = rows.GroupBy(x => x.ExtractionId).Select(g => new
@@ -837,26 +853,32 @@ public sealed partial class PredictionService(Db db)
         var transitionTargets = targetRows.Where(t => priorGroupsByDate.GetValueOrDefault(t.Date, []).Overlaps(currentGroups))
             .SelectMany(x => x.Numbers).ToList();
 
-        var freqM = Counts(all, x => x); var freqC = Counts(all, x => x[^3..]); var freqD = Counts(all, x => x[^2..]);
-        var timeM = Counts(longTerm, x => x); var timeC = Counts(longTerm, x => x[^3..]); var timeD = Counts(longTerm, x => x[^2..]);
-        var recentD = Counts(recent, x => x[^2..]); var longD = Counts(longTerm, x => x[^2..]);
-        var transitionD = Counts(transitionTargets, x => x[^2..]);
+        // Contagens em vetores indexados pelo próprio número: o laço dos 10.000 candidatos fica sem buscas por texto.
+        var freqM = Tally.Of(all, 10_000); var freqC = Tally.Of(all, 1_000); var freqD = Tally.Of(all, 100);
+        var timeM = Tally.Of(longTerm, 10_000); var timeC = Tally.Of(longTerm, 1_000); var timeD = Tally.Of(longTerm, 100);
+        var recentD = Tally.Of(recent, 100); var longD = Tally.Of(longTerm, 100);
+        var transitionD = Tally.Of(transitionTargets, 100);
         var digitCounts = new int[4, 10]; foreach (var n in longTerm) for (var p = 0; p < 4; p++) digitCounts[p, n[p] - '0']++;
         var digitMax = Enumerable.Range(0, 4).Select(p => (double)Math.Max(1, Enumerable.Range(0, 10).Max(digit => digitCounts[p, digit]))).ToArray();
         var maxPrior = Math.Max(1, priorAppearances.Values.DefaultIfEmpty().Max());
+        // Quem termina com a milhar ou a centena também termina com a dezena, então basta a última ocorrência da dezena.
+        var lastIndexByDezena = new int[100]; Array.Fill(lastIndexByDezena, -1);
+        for (var i = 0; i < longTerm.Count; i++) lastIndexByDezena[NumberValue(longTerm[i]) % 100] = i;
 
-        return Enumerable.Range(0, 10_000).Select(value =>
+        var scored = new List<Scored>(10_000);
+        for (var value = 0; value < 10_000; value++)
         {
-            var m = value.ToString("0000"); var c = m[^3..]; var d = m[^2..];
-            var frequency = v3 ? .10 * Norm(freqM, m) + .45 * Norm(freqC, c) + .45 * Norm(freqD, d) : .15 * Norm(freqM, m) + .35 * Norm(freqC, c) + .50 * Norm(freqD, d);
-            var timeFrequency = v3 ? .10 * Norm(timeM, m) + .45 * Norm(timeC, c) + .45 * Norm(timeD, d) : .15 * Norm(timeM, m) + .35 * Norm(timeC, c) + .50 * Norm(timeD, d);
-            var continuity = Norm(recentD, d);
-            var momentum = Math.Clamp(Norm(recentD, d) - Norm(longD, d), -1, 1);
-            var transition = Norm(transitionD, d);
-            var reversed = new string(d.Reverse().ToArray());
-            var reversal = Norm(recentD, reversed);
-            var digitAffinity = Enumerable.Range(0, 4).Average(p => digitCounts[p, m[p] - '0'] / digitMax[p]);
-            var lastIndex = longTerm.FindLastIndex(x => x == m || x.EndsWith(c, StringComparison.Ordinal) || x.EndsWith(d, StringComparison.Ordinal));
+            var m = MilharTexts[value]; var cv = value % 1_000; var dv = value % 100;
+            var frequency = v3 ? .10 * freqM.Norm(value) + .45 * freqC.Norm(cv) + .45 * freqD.Norm(dv) : .15 * freqM.Norm(value) + .35 * freqC.Norm(cv) + .50 * freqD.Norm(dv);
+            var timeFrequency = v3 ? .10 * timeM.Norm(value) + .45 * timeC.Norm(cv) + .45 * timeD.Norm(dv) : .15 * timeM.Norm(value) + .35 * timeC.Norm(cv) + .50 * timeD.Norm(dv);
+            var continuity = recentD.Norm(dv);
+            var momentum = Math.Clamp(recentD.Norm(dv) - longD.Norm(dv), -1, 1);
+            var transition = transitionD.Norm(dv);
+            var reversal = recentD.Norm(dv % 10 * 10 + dv / 10);
+            var digitSum = 0d;
+            for (var p = 0; p < 4; p++) digitSum += digitCounts[p, m[p] - '0'] / digitMax[p];
+            var digitAffinity = digitSum / 4;
+            var lastIndex = lastIndexByDezena[dv];
             var delay = lastIndex < 0 ? 1 : Math.Clamp((longTerm.Count - 1 - lastIndex) / 50d, 0, 1);
             var repetitionPenalty = priorAppearances.GetValueOrDefault(m) / (double)maxPrior;
             var novelty = 1 - repetitionPenalty;
@@ -865,9 +887,13 @@ public sealed partial class PredictionService(Db db)
             var statistical = 100 * (.22 * frequency + .12 * timeFrequency + .08 * delay + .12 * continuity +
                 .12 * transition + .10 * Math.Max(0, momentum) + .05 * reversal + .09 * digitAffinity + .10 * novelty);
             var final = Math.Clamp(statistical - 8 * repetitionPenalty, 0, 100);
-            var reasons = Explain(features);
-            return new Scored(m, c, d, GroupOf(m), Math.Round(statistical, 4), Math.Round(final, 4), features, reasons);
-        }).OrderByDescending(x => x.FinalScore).ThenBy(x => x.Milhar, StringComparer.Ordinal).ToList();
+            var reasons = explain ? Explain(features) : [];
+            scored.Add(new Scored(m, CentenaTexts[cv], DezenaTexts[dv], dv == 0 ? 25 : (dv + 3) / 4,
+                Math.Round(statistical, 4), Math.Round(final, 4), features, reasons));
+        }
+        // Maior score primeiro; empate pela milhar, que segue a ordem numérica.
+        scored.Sort((a, b) => a.FinalScore != b.FinalScore ? b.FinalScore.CompareTo(a.FinalScore) : string.CompareOrdinal(a.Milhar, b.Milhar));
+        return scored;
     }
 
     private static List<PredictionCandidate> Select(List<Scored> ranked, int quantity, long seed, bool restrictedToGroups)
@@ -905,27 +931,49 @@ public sealed partial class PredictionService(Db db)
             x.Candidate.Features, x.Candidate.Reasons)).ToList();
     }
 
+    private static readonly string[] MilharTexts = Enumerable.Range(0, 10_000).Select(x => x.ToString("0000")).ToArray();
+    private static readonly string[] CentenaTexts = Enumerable.Range(0, 1_000).Select(x => x.ToString("000")).ToArray();
+    private static readonly string[] DezenaTexts = Enumerable.Range(0, 100).Select(x => x.ToString("00")).ToArray();
+    private static int NumberValue(string number) =>
+        (number[0] - '0') * 1000 + (number[1] - '0') * 100 + (number[2] - '0') * 10 + (number[3] - '0');
+
     // O máximo é calculado uma vez por contagem; recalculá-lo a cada candidato tornava o Score quadrático.
-    private sealed record Tally(Dictionary<string, int> Values, int Max);
-    private static Tally Counts(IEnumerable<string> values, Func<string, string> key)
+    private sealed class Tally(int[] counts)
     {
-        var counts = values.GroupBy(key).ToDictionary(x => x.Key, x => x.Count());
-        return new Tally(counts, Math.Max(1, counts.Values.DefaultIfEmpty().Max()));
+        private readonly double max = Math.Max(1, counts.Max());
+        public static Tally Of(List<string> numbers, int modulo)
+        {
+            var counts = new int[modulo];
+            foreach (var number in numbers) counts[NumberValue(number) % modulo]++;
+            return new Tally(counts);
+        }
+        public double Norm(int key) => counts[key] / max;
     }
-    private static double Norm(Tally tally, string key) =>
-        tally.Values.Count == 0 ? 0 : tally.Values.GetValueOrDefault(key) / (double)tally.Max;
     private static int GroupOf(string number) { var value = int.Parse(number[^2..]); return value == 0 ? 25 : (value + 3) / 4; }
     private static long StableSeed(string value) => BitConverter.ToInt64(SHA256.HashData(Encoding.UTF8.GetBytes(value)), 0) & long.MaxValue;
+    private static readonly string[] ReasonTexts =
+    [
+        "boa frequência combinada no histórico", "aderência ao horário escolhido",
+        "continuidade nas extrações recentes", "sinal nas transições entre horários",
+        "momento recente acima da média", "atraso moderado como sinal secundário",
+        "reversão de dezena presente", "dígitos compatíveis com o padrão histórico",
+        "diversificação em relação às previsões anteriores"
+    ];
     private static List<string> Explain(PredictionFeatures f)
     {
-        var values = new List<(double Value, string Text)>
-        {
-            (f.Frequency, "boa frequência combinada no histórico"), (f.TimeFrequency, "aderência ao horário escolhido"),
-            (f.Continuity, "continuidade nas extrações recentes"), (f.Transition, "sinal nas transições entre horários"),
-            (Math.Max(0, f.Momentum), "momento recente acima da média"), (f.Delay, "atraso moderado como sinal secundário"),
-            (f.Reversal, "reversão de dezena presente"), (f.DigitAffinity, "dígitos compatíveis com o padrão histórico"),
-            (f.Novelty, "diversificação em relação às previsões anteriores")
-        };
-        return values.OrderByDescending(x => x.Value).Take(3).Where(x => x.Value > 0).Select(x => x.Text).ToList();
+        Span<double> values = [f.Frequency, f.TimeFrequency, f.Continuity, f.Transition, Math.Max(0, f.Momentum),
+            f.Delay, f.Reversal, f.DigitAffinity, f.Novelty];
+        // Os três maiores valores; em empate vence o que vem antes na lista, como numa ordenação estável.
+        Span<int> top = [-1, -1, -1];
+        for (var i = 0; i < values.Length; i++)
+            for (var slot = 0; slot < 3; slot++)
+            {
+                if (top[slot] >= 0 && values[i] <= values[top[slot]]) continue;
+                for (var move = 2; move > slot; move--) top[move] = top[move - 1];
+                top[slot] = i; break;
+            }
+        var reasons = new List<string>(3);
+        foreach (var index in top) if (index >= 0 && values[index] > 0) reasons.Add(ReasonTexts[index]);
+        return reasons;
     }
 }
