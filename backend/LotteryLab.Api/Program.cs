@@ -51,6 +51,15 @@ builder.Services.AddHttpClient<ResultFacilHistoryService>(client =>
     client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("pt-BR,pt;q=0.9,en;q=0.8");
     client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
 });
+builder.Services.AddSingleton<MegaSenaSchema>();
+builder.Services.AddScoped<MegaSenaService>();
+builder.Services.AddSingleton<MegaSenaHistoryJobService>();
+builder.Services.AddHttpClient<MegaSenaResultsService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(60);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36");
+    client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("pt-BR,pt;q=0.9,en;q=0.8");
+});
 builder.Services.AddHostedService<ExternalResultsWorker>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ??
     ["https://lottery-lab.gomeslucas103.workers.dev", "http://localhost:4200"];
@@ -59,6 +68,7 @@ builder.Services.AddCors(o => o.AddPolicy("web", p => p.WithOrigins(origins).All
 var app = builder.Build();
 await app.Services.GetRequiredService<PredictionSchema>().Initialize();
 await app.Services.GetRequiredService<AuthSchema>().Initialize();
+await app.Services.GetRequiredService<MegaSenaSchema>().Initialize();
 // A reavaliação roda em segundo plano para a API responder logo após o deploy ou o cold start.
 app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
 {
