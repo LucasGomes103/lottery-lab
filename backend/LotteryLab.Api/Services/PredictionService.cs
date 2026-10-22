@@ -163,18 +163,29 @@ public sealed partial class PredictionService(Db db)
         quantity = Math.Clamp(quantity, 1, 10_000);
         var candidateWindows = new[] { 30, 60, 90, 120, 180, 240 };
         await using var connection = db.Open();
+        // Os dias avaliados vêm do banco; assim o histórico carregado se limita ao que as janelas realmente usam.
+        var dates = (await connection.QueryAsync<DateTime>(
+            @"select e.extraction_date from extractions e
+              where e.bank=@bank and e.extraction_date<@targetDate
+                and exists(select 1 from results r where r.extraction_id=e.id and r.position between 1 and 10)
+              group by e.extraction_date having count(*)>=4
+              order by e.extraction_date desc limit 60",
+            new { bank, targetDate = targetDate.ToDateTime(TimeOnly.MinValue) }))
+            .Select(DateOnly.FromDateTime).Order().ToList();
+        if (dates.Count == 0)
+            return new DailyWindowChoice(180, 0, 0, 0, 0, "Base insuficiente; aplicada janela diária padrão de 180 dias.");
         var rows = (await connection.QueryAsync<Row>(
             @"select e.id as ExtractionId,e.extraction_date as Date,e.extraction_time as Time,
                      r.position as Position,r.number as Number
               from results r join extractions e on e.id=r.extraction_id
-              where e.bank=@bank and e.extraction_date<@targetDate and r.position between 1 and 10
+              where e.bank=@bank and e.extraction_date>=@start and e.extraction_date<@targetDate and r.position between 1 and 10
               order by e.extraction_date,e.extraction_time,r.position",
-            new { bank, targetDate = targetDate.ToDateTime(TimeOnly.MinValue) })).ToList();
-        var dates = rows.GroupBy(x => x.Date.Date)
-            .Where(day => day.Select(x => x.ExtractionId).Distinct().Count() >= 4)
-            .Select(day => DateOnly.FromDateTime(day.Key)).OrderDescending().Take(60).Order().ToList();
-        if (dates.Count == 0)
-            return new DailyWindowChoice(180, 0, 0, 0, 0, "Base insuficiente; aplicada janela diária padrão de 180 dias.");
+            new
+            {
+                bank,
+                start = dates[0].AddDays(-candidateWindows.Max()).ToDateTime(TimeOnly.MinValue),
+                targetDate = targetDate.ToDateTime(TimeOnly.MinValue)
+            })).ToList();
 
         var comparisons = new List<DailyWindowChoice>();
         foreach (var window in candidateWindows)
@@ -190,8 +201,8 @@ public sealed partial class PredictionService(Db db)
                 var picks = Select(Score(history, baseTime, [], true), quantity, seed, false);
                 var actual = rows.Where(x => x.Date.Date == historyEnd).Select(x => x.Number.PadLeft(4, '0')[^4..]).ToList();
                 milharHits += picks.Sum(pick => actual.Count(number => number == pick.Milhar));
-                centenaHits += picks.Sum(pick => actual.Count(number => number.EndsWith(pick.Centena)));
-                dezenaHits += picks.Sum(pick => actual.Count(number => number.EndsWith(pick.Dezena)));
+                centenaHits += picks.Sum(pick => actual.Count(number => number.EndsWith(pick.Centena, StringComparison.Ordinal)));
+                dezenaHits += picks.Sum(pick => actual.Count(number => number.EndsWith(pick.Dezena, StringComparison.Ordinal)));
             }
             comparisons.Add(new DailyWindowChoice(window, dates.Count, milharHits, centenaHits, dezenaHits,
                 "Walk-forward diário: uma única lista é gerada antes do primeiro horário e confrontada com todos os resultados disponíveis do dia."));
@@ -386,18 +397,18 @@ public sealed partial class PredictionService(Db db)
         var detailed = candidates.Select(candidate =>
         {
             var milharMatches = actual.Where(x => x.Number == candidate.Milhar).Select(x => new { x.Position, x.Number }).ToList();
-            var centenaMatches = actual.Where(x => x.Number.EndsWith(candidate.Centena)).Select(x => new { x.Position, x.Number }).ToList();
-            var dezenaMatches = actual.Where(x => x.Number.EndsWith(candidate.Dezena)).Select(x => new { x.Position, x.Number }).ToList();
+            var centenaMatches = actual.Where(x => x.Number.EndsWith(candidate.Centena, StringComparison.Ordinal)).Select(x => new { x.Position, x.Number }).ToList();
+            var dezenaMatches = actual.Where(x => x.Number.EndsWith(candidate.Dezena, StringComparison.Ordinal)).Select(x => new { x.Position, x.Number }).ToList();
             object Match(TimeSpan matchTime, int position, string number) => new
             {
                 Time = $"{matchTime.Hours:00}:{matchTime.Minutes:00}", Position = position, Number = number
             };
             var beforeMilhar = beforeTarget.Where(x => x.Number == candidate.Milhar).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
-            var beforeCentena = beforeTarget.Where(x => x.Number.EndsWith(candidate.Centena)).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
-            var beforeDezena = beforeTarget.Where(x => x.Number.EndsWith(candidate.Dezena)).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
+            var beforeCentena = beforeTarget.Where(x => x.Number.EndsWith(candidate.Centena, StringComparison.Ordinal)).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
+            var beforeDezena = beforeTarget.Where(x => x.Number.EndsWith(candidate.Dezena, StringComparison.Ordinal)).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
             var dayMilhar = dayResults.Where(x => x.Number == candidate.Milhar).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
-            var dayCentena = dayResults.Where(x => x.Number.EndsWith(candidate.Centena)).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
-            var dayDezena = dayResults.Where(x => x.Number.EndsWith(candidate.Dezena)).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
+            var dayCentena = dayResults.Where(x => x.Number.EndsWith(candidate.Centena, StringComparison.Ordinal)).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
+            var dayDezena = dayResults.Where(x => x.Number.EndsWith(candidate.Dezena, StringComparison.Ordinal)).Select(x => Match(x.Time, x.Position, x.Number)).ToList();
             return new
             {
                 candidate.Rank, candidate.Milhar, candidate.Centena, candidate.Dezena, candidate.Group,
@@ -679,8 +690,8 @@ public sealed partial class PredictionService(Db db)
                         and r.position between 1 and 10 order by r.position",
                     new { bank, date = target.Date, time = targetTime.ToString("HH:mm") })).ToList();
                 var milhar = selected.Sum(c => actual.Count(x => x == c.Milhar));
-                var centena = selected.Sum(c => actual.Count(x => x.EndsWith(c.Centena)));
-                var dezena = selected.Sum(c => actual.Count(x => x.EndsWith(c.Dezena)));
+                var centena = selected.Sum(c => actual.Count(x => x.EndsWith(c.Centena, StringComparison.Ordinal)));
+                var dezena = selected.Sum(c => actual.Count(x => x.EndsWith(c.Dezena, StringComparison.Ordinal)));
                 totalMilhar += milhar; totalCentena += centena; totalDezena += dezena;
                 scheduleResults.Add(new { time = targetTime.ToString("HH:mm"), sampleExtractions = rows.Select(x => x.ExtractionId).Distinct().Count(),
                     milharHits = milhar, centenaHits = centena, dezenaHits = dezena });
@@ -739,8 +750,8 @@ public sealed partial class PredictionService(Db db)
         void AddTrial(string model, List<string> picks, List<string> actual)
         {
             var m = picks.Sum(p => actual.Count(a => a == p));
-            var c = picks.Sum(p => actual.Count(a => a.EndsWith(p[^3..])));
-            var d = picks.Sum(p => actual.Count(a => a.EndsWith(p[^2..])));
+            var c = picks.Sum(p => actual.Count(a => a.EndsWith(p[^3..], StringComparison.Ordinal)));
+            var d = picks.Sum(p => actual.Count(a => a.EndsWith(p[^2..], StringComparison.Ordinal)));
             var returned = d * dezenaPayout + c * centenaPayout + m * milharPayout;
             trials.Add((model, returned - betAmount, returned, m, c, d));
         }
@@ -808,6 +819,7 @@ public sealed partial class PredictionService(Db db)
         var recentD = Counts(recent, x => x[^2..]); var longD = Counts(longTerm, x => x[^2..]);
         var transitionD = Counts(transitionTargets, x => x[^2..]);
         var digitCounts = new int[4, 10]; foreach (var n in longTerm) for (var p = 0; p < 4; p++) digitCounts[p, n[p] - '0']++;
+        var digitMax = Enumerable.Range(0, 4).Select(p => (double)Math.Max(1, Enumerable.Range(0, 10).Max(digit => digitCounts[p, digit]))).ToArray();
         var maxPrior = Math.Max(1, priorAppearances.Values.DefaultIfEmpty().Max());
 
         return Enumerable.Range(0, 10_000).Select(value =>
@@ -820,8 +832,8 @@ public sealed partial class PredictionService(Db db)
             var transition = Norm(transitionD, d);
             var reversed = new string(d.Reverse().ToArray());
             var reversal = Norm(recentD, reversed);
-            var digitAffinity = Enumerable.Range(0, 4).Average(p => digitCounts[p, m[p] - '0'] / (double)Math.Max(1, Enumerable.Range(0, 10).Max(digit => digitCounts[p, digit])));
-            var lastIndex = longTerm.FindLastIndex(x => x == m || x.EndsWith(c) || x.EndsWith(d));
+            var digitAffinity = Enumerable.Range(0, 4).Average(p => digitCounts[p, m[p] - '0'] / digitMax[p]);
+            var lastIndex = longTerm.FindLastIndex(x => x == m || x.EndsWith(c, StringComparison.Ordinal) || x.EndsWith(d, StringComparison.Ordinal));
             var delay = lastIndex < 0 ? 1 : Math.Clamp((longTerm.Count - 1 - lastIndex) / 50d, 0, 1);
             var repetitionPenalty = priorAppearances.GetValueOrDefault(m) / (double)maxPrior;
             var novelty = 1 - repetitionPenalty;
@@ -832,7 +844,7 @@ public sealed partial class PredictionService(Db db)
             var final = Math.Clamp(statistical - 8 * repetitionPenalty, 0, 100);
             var reasons = Explain(features);
             return new Scored(m, c, d, GroupOf(m), Math.Round(statistical, 4), Math.Round(final, 4), features, reasons);
-        }).OrderByDescending(x => x.FinalScore).ThenBy(x => x.Milhar).ToList();
+        }).OrderByDescending(x => x.FinalScore).ThenBy(x => x.Milhar, StringComparer.Ordinal).ToList();
     }
 
     private static List<PredictionCandidate> Select(List<Scored> ranked, int quantity, long seed, bool restrictedToGroups)
@@ -870,10 +882,15 @@ public sealed partial class PredictionService(Db db)
             x.Candidate.Features, x.Candidate.Reasons)).ToList();
     }
 
-    private static Dictionary<string, int> Counts(IEnumerable<string> values, Func<string, string> key) =>
-        values.GroupBy(key).ToDictionary(x => x.Key, x => x.Count());
-    private static double Norm(Dictionary<string, int> values, string key) =>
-        values.Count == 0 ? 0 : values.GetValueOrDefault(key) / (double)Math.Max(1, values.Values.Max());
+    // O máximo é calculado uma vez por contagem; recalculá-lo a cada candidato tornava o Score quadrático.
+    private sealed record Tally(Dictionary<string, int> Values, int Max);
+    private static Tally Counts(IEnumerable<string> values, Func<string, string> key)
+    {
+        var counts = values.GroupBy(key).ToDictionary(x => x.Key, x => x.Count());
+        return new Tally(counts, Math.Max(1, counts.Values.DefaultIfEmpty().Max()));
+    }
+    private static double Norm(Tally tally, string key) =>
+        tally.Values.Count == 0 ? 0 : tally.Values.GetValueOrDefault(key) / (double)tally.Max;
     private static int GroupOf(string number) { var value = int.Parse(number[^2..]); return value == 0 ? 25 : (value + 3) / 4; }
     private static long StableSeed(string value) => BitConverter.ToInt64(SHA256.HashData(Encoding.UTF8.GetBytes(value)), 0) & long.MaxValue;
     private static List<string> Explain(PredictionFeatures f)

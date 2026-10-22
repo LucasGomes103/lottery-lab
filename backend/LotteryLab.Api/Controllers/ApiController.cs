@@ -350,7 +350,8 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     {
         if (!IsNational(request.Bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
         if (!TimeOnly.TryParse(request.Time, out _)) return BadRequest(new { message = "Horário inválido." });
-        return Ok(await predictions.GenerateAndSave(request));
+        try { return Ok(await predictions.GenerateAndSave(request)); }
+        catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
     }
 
     [HttpPost("ternos/generate")]
@@ -386,7 +387,8 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
     {
         if (!IsNational(request.Bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
         if (!TimeOnly.TryParse(request.Time, out _)) return BadRequest(new { message = "Horário inválido." });
-        return Ok(await predictions.GenerateForBankDay(request));
+        try { return Ok(await predictions.GenerateForBankDay(request)); }
+        catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
     }
 
     [HttpPost("predictions/manual")]
