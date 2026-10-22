@@ -54,7 +54,7 @@ export class AppComponent implements OnInit {
     editingIds: number[] = [];
     selectedHistoryIds = new Set<number>();
     history: HistoryItem[] = [];
-    activeSection: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'dashboard' | 'users' | 'account' = 'import';
+    activeSection: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'megasena' | 'dashboard' | 'users' | 'account' = 'import';
     historyBank = 'LT NACIONAL';
     historyStartDate = '';
     historyEndDate = '';
@@ -137,6 +137,41 @@ export class AppComponent implements OnInit {
     dashboardEndDate = '';
     dashboardTime = '';
     generating = false;
+    megaTab: 'generate' | 'history' | 'results' = 'generate';
+    megaTargetContest: number | null = null;
+    megaQuantity = 5;
+    megaNumbersPerGame = 6;
+    megaWindowContests = 100;
+    megaSeed: number | null = null;
+    megaGenerating = false;
+    megaGeneration: any = null;
+    megaPredictions: any[] = [];
+    megaPredictionPage = 1;
+    megaPredictionTotalPages = 1;
+    megaPredictionTotal = 0;
+    loadingMegaPredictions = false;
+    selectedMegaPrediction: any = null;
+    selectedMegaIds = new Set<string>();
+    deletingMega = false;
+    megaDraws: any[] = [];
+    megaDrawPage = 1;
+    megaDrawTotalPages = 1;
+    megaDrawTotal = 0;
+    megaLatestContest: number | null = null;
+    megaMissingDraws = 0;
+    loadingMegaDraws = false;
+    megaSyncJob: any = null;
+    megaSyncingHistory = false;
+    megaSyncingLatest = false;
+    private megaSyncPoll: ReturnType<typeof setInterval> | null = null;
+    megaStatistics: any = null;
+    loadingMegaStatistics = false;
+    megaBacktest: any = null;
+    loadingMegaBacktest = false;
+    megaBacktestContests = 200;
+    megaBacktestNumbers = 6;
+    megaBacktestQuantity = 5;
+    readonly megaBetPrice = 6;
     authReady = false;
     currentUser: any = null;
     loginUsername = '';
@@ -201,20 +236,21 @@ export class AppComponent implements OnInit {
         if (this.hasPermission('imports.write')) { this.activeSection = 'import'; this.loadExternalSyncStatus(); }
         else if (this.hasPermission('history.read')) { this.activeSection = 'history'; this.loadHistory(1); }
         else if (this.hasPermission('predictions.read')) { this.activeSection = 'predictions'; this.loadPredictionHistory(1); }
-        else if (this.hasPermission('dashboard.read')) { this.activeSection = 'dashboard'; this.loadDashboard(); }
+        else if (this.hasPermission('dashboard.read')) { this.activeSection = 'dashboard'; this.loadDashboard(); this.loadMegaStatistics(); }
         else if (this.hasPermission('analysis.use')) this.activeSection = 'analysis';
         if (this.hasPermission('users.manage')) this.loadUsers();
     }
 
     private finishLogout() { localStorage.removeItem('lotteryLabToken'); this.currentUser = null; }
 
-    navigate(section: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'dashboard' | 'users' | 'account') {
+    navigate(section: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'megasena' | 'dashboard' | 'users' | 'account') {
         this.activeSection = section;
         this.error = '';
         this.message = '';
         if (section === 'history') this.loadHistory(this.historyPage);
         if (section === 'predictions') this.loadPredictionHistory(this.predictionPage);
-        if (section === 'dashboard') this.loadDashboard();
+        if (section === 'dashboard') { this.loadDashboard(); this.loadMegaStatistics(); }
+        if (section === 'megasena') this.openMegaTab(this.megaTab);
         if (section === 'users') this.loadUsers();
     }
 
@@ -1097,6 +1133,168 @@ export class AppComponent implements OnInit {
     ask() {
         this.ai = 'Analisando...';
         this.http.post<any>(this.api + '/ai/analyze', { bank: this.bank, time: this.analysisTime, windowDays: this.windowDays, question: 'Compare continuidade, atraso, reversão e o ranking híbrido com base nos dados disponíveis.' }).subscribe(x => this.ai = x.answer);
+    }
+
+    openMegaTab(tab: 'generate' | 'history' | 'results') {
+        this.megaTab = tab;
+        if (tab === 'history') this.loadMegaPredictions(this.megaPredictionPage);
+        if (tab === 'results') { this.loadMegaDraws(this.megaDrawPage); if (this.hasPermission('imports.write')) this.loadMegaSyncStatus(); }
+    }
+
+    megaCombinations(n: number, k = 6) {
+        if (k < 0 || k > n) return 0;
+        let result = 1;
+        for (let i = 1; i <= k; i++) result = result * (n - k + i) / i;
+        return Math.round(result);
+    }
+
+    megaGameCost(numbersPerGame = this.megaNumbersPerGame) { return this.megaCombinations(Number(numbersPerGame) || 6) * this.megaBetPrice; }
+
+    megaTotalCost() { return this.megaGameCost() * (Number(this.megaQuantity) || 0); }
+
+    megaBall(value: number) { return String(value).padStart(2, '0'); }
+
+    megaIsHit(game: any, value: number) { return (game.matchedNumbers || []).includes(value); }
+
+    generateMegaSena() {
+        if (this.megaGenerating) return;
+        this.megaGenerating = true; this.error = ''; this.message = '';
+        const body: any = { quantity: Number(this.megaQuantity), numbersPerGame: Number(this.megaNumbersPerGame), windowContests: Number(this.megaWindowContests) };
+        if (this.megaTargetContest) body.targetContest = Number(this.megaTargetContest);
+        if (this.megaSeed !== null && String(this.megaSeed) !== '') body.seed = Number(this.megaSeed);
+        this.http.post<any>(this.api + '/megasena/generate', body).subscribe({
+            next: response => { this.megaGeneration = response; this.megaGenerating = false; this.message = `${response.quantity} jogos gerados para o concurso ${response.targetContest}.`; },
+            error: error => { this.error = this.errorMessage(error); this.megaGenerating = false; }
+        });
+    }
+
+    copyMegaGames(source: any) {
+        const text = (source?.games || []).map((game: any) => game.numbers.map((n: number) => this.megaBall(n)).join(' ')).join('\n');
+        navigator.clipboard.writeText(text).then(() => this.message = 'Jogos copiados.', () => this.error = 'Não foi possível copiar os jogos.');
+    }
+
+    loadMegaPredictions(page = 1) {
+        this.loadingMegaPredictions = true;
+        this.http.get<any>(this.api + `/megasena/predictions?page=${Math.max(1, page)}&pageSize=20`).subscribe({
+            next: response => {
+                this.megaPredictions = response.items; this.megaPredictionPage = response.page;
+                this.megaPredictionTotalPages = response.totalPages; this.megaPredictionTotal = response.total;
+                this.selectedMegaIds = new Set([...this.selectedMegaIds].filter(id => response.items.some((x: any) => x.id === id)));
+                this.loadingMegaPredictions = false;
+            },
+            error: error => { this.error = this.errorMessage(error); this.loadingMegaPredictions = false; }
+        });
+    }
+
+    openMegaPrediction(id: string) {
+        this.http.get<any>(this.api + `/megasena/predictions/${id}`).subscribe({
+            next: response => this.selectedMegaPrediction = response,
+            error: error => this.error = this.errorMessage(error)
+        });
+    }
+
+    toggleMegaSelection(id: string, checked: boolean) {
+        if (checked) this.selectedMegaIds.add(id); else this.selectedMegaIds.delete(id);
+        this.selectedMegaIds = new Set(this.selectedMegaIds);
+    }
+
+    toggleAllMega(checked: boolean) {
+        this.selectedMegaIds = checked ? new Set(this.megaPredictions.map(x => x.id)) : new Set<string>();
+    }
+
+    deleteSelectedMega() {
+        if (!this.selectedMegaIds.size || this.deletingMega) return;
+        if (!window.confirm(`Excluir ${this.selectedMegaIds.size} registro(s) de jogos da Mega-Sena?`)) return;
+        this.deletingMega = true;
+        this.http.post<any>(this.api + '/megasena/predictions/delete-batch', { ids: [...this.selectedMegaIds] }).subscribe({
+            next: response => {
+                this.message = `${response.deleted} registro(s) excluído(s).`; this.deletingMega = false;
+                if (this.selectedMegaPrediction && this.selectedMegaIds.has(this.selectedMegaPrediction.id)) this.selectedMegaPrediction = null;
+                this.selectedMegaIds = new Set<string>(); this.loadMegaPredictions(this.megaPredictionPage);
+            },
+            error: error => { this.error = this.errorMessage(error); this.deletingMega = false; }
+        });
+    }
+
+    loadMegaDraws(page = 1) {
+        this.loadingMegaDraws = true;
+        this.http.get<any>(this.api + `/megasena/draws?page=${Math.max(1, page)}&pageSize=20`).subscribe({
+            next: response => {
+                this.megaDraws = response.items; this.megaDrawPage = response.page; this.megaDrawTotalPages = response.totalPages;
+                this.megaDrawTotal = response.total; this.megaLatestContest = response.latestContest; this.megaMissingDraws = response.missing;
+                this.loadingMegaDraws = false;
+            },
+            error: error => { this.error = this.errorMessage(error); this.loadingMegaDraws = false; }
+        });
+    }
+
+    syncMegaLatest() {
+        if (this.megaSyncingLatest) return;
+        this.megaSyncingLatest = true; this.error = '';
+        this.http.post<any>(this.api + '/megasena/sync-latest', {}).subscribe({
+            next: draw => { this.megaSyncingLatest = false; this.message = `Concurso ${draw.contest} sincronizado.`; this.loadMegaDraws(1); },
+            error: error => { this.error = this.errorMessage(error); this.megaSyncingLatest = false; }
+        });
+    }
+
+    syncMegaHistory() {
+        if (this.megaSyncingHistory) return;
+        this.megaSyncingHistory = true; this.error = '';
+        this.http.post<any>(this.api + '/megasena/sync-history', {}).subscribe({
+            next: job => { this.megaSyncJob = job; this.pollMegaSync(); },
+            error: error => { this.error = this.errorMessage(error); this.megaSyncingHistory = false; }
+        });
+    }
+
+    private loadMegaSyncStatus() {
+        this.http.get<any>(this.api + '/megasena/sync-history/status').subscribe({
+            next: job => {
+                if (job.status === 'IDLE') return;
+                this.megaSyncJob = job;
+                if (job.status === 'RUNNING') { this.megaSyncingHistory = true; this.pollMegaSync(); }
+            },
+            error: () => { }
+        });
+    }
+
+    private pollMegaSync() {
+        if (this.megaSyncPoll) clearInterval(this.megaSyncPoll);
+        const poll = () => this.http.get<any>(this.api + '/megasena/sync-history/status').subscribe({
+            next: job => {
+                this.megaSyncJob = job;
+                if (job.status === 'RUNNING') return;
+                this.megaSyncingHistory = false; this.stopMegaSyncPoll();
+                if (job.status === 'FAILED') this.error = job.error || 'A carga histórica da Mega-Sena falhou.';
+                else this.message = `Carga concluída: ${job.result?.imported ?? 0} concursos importados.`;
+                this.loadMegaDraws(1);
+            },
+            error: error => { this.error = this.errorMessage(error); this.megaSyncingHistory = false; this.stopMegaSyncPoll(); }
+        });
+        poll(); this.megaSyncPoll = setInterval(poll, 1500);
+    }
+
+    private stopMegaSyncPoll() {
+        if (this.megaSyncPoll) clearInterval(this.megaSyncPoll);
+        this.megaSyncPoll = null;
+    }
+
+    loadMegaStatistics() {
+        if (!this.hasPermission('dashboard.read')) return;
+        this.loadingMegaStatistics = true;
+        this.http.get<any>(this.api + '/megasena/statistics').subscribe({
+            next: response => { this.megaStatistics = response; this.loadingMegaStatistics = false; },
+            error: error => { this.error = this.errorMessage(error); this.loadingMegaStatistics = false; }
+        });
+    }
+
+    runMegaBacktest() {
+        if (this.loadingMegaBacktest) return;
+        this.loadingMegaBacktest = true; this.megaBacktest = null; this.error = '';
+        const params = new URLSearchParams({ contests: String(this.megaBacktestContests), numbersPerGame: String(this.megaBacktestNumbers), quantity: String(this.megaBacktestQuantity) });
+        this.http.get<any>(this.api + `/megasena/backtest?${params}`).subscribe({
+            next: response => { this.megaBacktest = response; this.loadingMegaBacktest = false; },
+            error: error => { this.error = this.errorMessage(error); this.loadingMegaBacktest = false; }
+        });
     }
 
     private errorMessage(error: HttpErrorResponse): string {
