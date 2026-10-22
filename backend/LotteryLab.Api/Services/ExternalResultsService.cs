@@ -181,6 +181,14 @@ public sealed class ExternalResultsWorker(IServiceScopeFactory scopeFactory, ILo
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception) { logger.LogWarning(exception, "Sincronização automática será tentada novamente."); }
+            // Isolada do jogo do bicho: uma falha na Mega-Sena não interrompe as demais sincronizações.
+            try
+            {
+                await using var scope = scopeFactory.CreateAsyncScope();
+                await scope.ServiceProvider.GetRequiredService<MegaSenaResultsService>().SyncLatest(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception exception) { logger.LogWarning(exception, "Sincronização da Mega-Sena será tentada novamente."); }
         } while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 
