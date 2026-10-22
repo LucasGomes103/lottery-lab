@@ -75,8 +75,21 @@ Os scores são rankings relativos, não probabilidades calibradas. Em sorteios i
 - O dashboard apresenta valor apostado, retorno, saldo e ROI, consolidados e separados por horário e data.
 - A tela de Análises inclui uma bateria de decisão que confronta V2, V3 e uma seleção aleatória com as
   mesmas cotações. Ela executa walk-forward cronológico, usa apenas o passado em cada ponto e reserva os
-  20% finais para teste; a decisão só considera sinal positivo quando o ROI final e o intervalo contra o
-  aleatório permanecem positivos.
+  20% finais para teste.
+- Cada modelo é comparado também ao retorno teórico de um sorteio uniforme:
+  `quantidade × prêmios × (dezena/100 + centena/1000 + milhar/10000)` por previsão (`expectedRoiPercent`).
+  O intervalo do excesso sobre esse esperado usa a variância do próprio modelo e z = 2,241 (Bonferroni para
+  V2 e V3). A decisão só aponta sinal positivo quando o ROI do teste final é positivo e esse intervalo fica
+  inteiro acima de zero. Os campos contra a amostra aleatória (IC 95%) continuam no retorno para comparação.
+- `testFrom` (data) troca os 20% finais pelas extrações a partir dessa data. As janelas por horário acima foram
+  escolhidas em 04/09/2026 (commit `e80d3eb`) com dados anteriores, então `testFrom=2026-09-04` é o teste fora
+  da amostra natural para o V3.
+- `GET /api/analysis/randomness?bank=...&prizeRange=5` executa testes de aleatoriedade sobre todo o histórico:
+  qui-quadrado de grupos (gl 24), dezenas (gl 99), cada dígito da milhar (gl 9) e grupos por horário;
+  testes z de repetição de grupos entre extrações consecutivas e do grupo do 1º prêmio nos demais; testes de
+  sequências de Wald–Wolfowitz para par/ímpar e alta/baixa da dezena do 1º prêmio. Com correção de
+  Bonferroni, se nenhum teste é significativo o veredito é "SEM EVIDÊNCIA CONTRA ALEATORIEDADE" e nenhuma
+  mudança na fórmula de previsão pode aumentar a taxa de acerto esperada.
 
 O retorno financeiro é uma simulação baseada nos valores configurados na previsão; confira sempre as regras e
 cotações efetivamente aplicadas antes de apostar.

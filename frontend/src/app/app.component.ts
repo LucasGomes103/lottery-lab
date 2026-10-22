@@ -25,6 +25,10 @@ export class AppComponent implements OnInit {
     loadingDecisionBattery = false;
     decisionBatteryJob: any = null;
     decisionBatteryMaxEvaluations = 3000;
+    decisionBatteryTestFrom = '';
+    randomness: any = null;
+    loadingRandomness = false;
+    randomnessPrizeRange = 5;
     private decisionBatteryPoll: ReturnType<typeof setInterval> | null = null;
     ai = '';
     message = '';
@@ -565,6 +569,7 @@ export class AppComponent implements OnInit {
             betAmount: String(this.betAmount), dezenaPayout: String(this.dezenaPayout),
             centenaPayout: String(this.centenaPayout), milharPayout: String(this.milharPayout),
             prizeRange: String(this.prizeRange), maxEvaluations: String(Math.min(3000, Math.max(100, Number(this.decisionBatteryMaxEvaluations) || 3000))) });
+        if (this.decisionBatteryTestFrom) params.set('testFrom', this.decisionBatteryTestFrom);
         this.http.post<any>(this.api + `/predictions/decision-battery/jobs?${params}`, {}).subscribe({
             next: job => { this.decisionBatteryJob = job; this.pollDecisionBattery(job.id); },
             error: error => { this.error = this.errorMessage(error); this.loadingDecisionBattery = false; }
@@ -583,6 +588,17 @@ export class AppComponent implements OnInit {
         });
         poll();
         this.decisionBatteryPoll = setInterval(poll, 1500);
+    }
+
+    runRandomness() {
+        this.loadingRandomness = true;
+        this.randomness = null;
+        this.error = '';
+        const params = new URLSearchParams({ bank: this.bank, prizeRange: String(Math.min(10, Math.max(1, Number(this.randomnessPrizeRange) || 5))) });
+        this.http.get<any>(this.api + `/analysis/randomness?${params}`).subscribe({
+            next: result => { this.randomness = result; this.loadingRandomness = false; },
+            error: error => { this.error = this.errorMessage(error); this.loadingRandomness = false; }
+        });
     }
 
     private stopDecisionBatteryPoll() {
