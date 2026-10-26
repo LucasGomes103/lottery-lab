@@ -100,7 +100,10 @@ export class AppComponent implements OnInit {
     dezenaStake = 10;
     centenaStake = 10;
     milharStake = 10;
-    generateForAllBankTimes = false;
+    // single: só o horário base · same: a mesma lista em todos os horários · each: um cálculo para cada horário
+    bankDayMode: 'single' | 'same' | 'each' = 'single';
+    get generateForAllBankTimes() { return this.bankDayMode !== 'single'; }
+    dayGenerations: GenerationResponse[] = [];
     dezenaPayout = 180;
     centenaPayout = 1800;
     milharPayout = 18000;
@@ -907,13 +910,17 @@ export class AppComponent implements OnInit {
             useRecommendedWindow: this.useRecommendedWindow, betAmount: this.betAmount, prizeRange: this.prizeRange,
             dezenaStake: this.dezenaStake, centenaStake: this.centenaStake, milharStake: this.milharStake,
             groups: Array.from(this.selectedAnimalGroups) };
-        const endpoint = this.generateForAllBankTimes ? '/predictions/generate-bank-day' : '/predictions/generate';
+        const mode = this.bankDayMode;
+        const endpoint = mode === 'each' ? '/predictions/generate-bank-day-each'
+            : mode === 'same' ? '/predictions/generate-bank-day' : '/predictions/generate';
         // Sem resposta em 3 minutos o botão é liberado, em vez de ficar em "Calculando..." para sempre.
         this.http.post<GenerationResponse | BankDayGenerationResponse>(this.api + endpoint, payload).pipe(timeout(180000)).subscribe({
             next: response => {
-                const batch = this.generateForAllBankTimes ? response as BankDayGenerationResponse : null;
+                const batch = mode !== 'single' ? response as BankDayGenerationResponse : null;
                 const generated = batch ? batch.sourcePrediction : response as GenerationResponse;
-                generated.numbers = this.sortByGroupAndMilhar(generated.numbers);
+                this.dayGenerations = mode === 'each' && batch ? batch.predictions : [];
+                for (const item of this.dayGenerations.length ? this.dayGenerations : [generated])
+                    item.numbers = this.sortByGroupAndMilhar(item.numbers);
                 this.generation = generated;
                 this.expandedReasonRanks.clear();
                 this.generatorKind = 'hybrid';
@@ -949,7 +956,7 @@ export class AppComponent implements OnInit {
         const payload = { bank: this.manualBank, time: this.manualTime, targetDate: this.manualDate, numbers: this.manualNumbersText,
             prizeRange: this.manualPrizeRange, dezenaStake: this.manualDezenaStake, centenaStake: this.manualCentenaStake, milharStake: this.manualMilharStake };
         this.http.post<GenerationResponse>(this.api + '/predictions/manual', payload).subscribe({
-            next: response => { response.numbers = this.sortByGroupAndMilhar(response.numbers); this.generation = response; this.savingManualBet = false; this.message = 'Aposta manual registrada e pronta para conferência.'; },
+            next: response => { response.numbers = this.sortByGroupAndMilhar(response.numbers); this.generation = response; this.dayGenerations = []; this.savingManualBet = false; this.message = 'Aposta manual registrada e pronta para conferência.'; },
             error: error => { this.error = this.errorMessage(error); this.savingManualBet = false; }
         });
     }
@@ -1003,6 +1010,13 @@ export class AppComponent implements OnInit {
     }
 
     bankDayBetAmount() { return this.betAmount * this.schedulesFor().length; }
+
+    dayGenerationsTotal() { return this.dayGenerations.reduce((total, item) => total + item.betAmount, 0); }
+
+    showDayGeneration(item: GenerationResponse) {
+        this.generation = item;
+        this.expandedReasonRanks.clear();
+    }
 
     stakePerNumber(stake: number) {
         const quantity = Math.max(1, Number(this.generationQuantity) || 1);

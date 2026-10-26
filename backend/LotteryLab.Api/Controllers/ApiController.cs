@@ -391,6 +391,16 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
         catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
     }
 
+    [HttpPost("predictions/generate-bank-day-each")]
+    [Authorize(Policy = Permissions.PredictionsWrite)]
+    public async Task<IActionResult> GeneratePredictionForEachBankTime(PredictionRequest request)
+    {
+        if (!IsNational(request.Bank)) return BadRequest(new { message = "Selecione Loteria Nacional ou Look Loterias." });
+        if (!TimeOnly.TryParse(request.Time, out _)) return BadRequest(new { message = "Horário inválido." });
+        try { return Ok(await predictions.GenerateForBankDayEach(request)); }
+        catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
+    }
+
     [HttpPost("predictions/manual")]
     [Authorize(Policy = Permissions.PredictionsWrite)]
     public async Task<IActionResult> SaveManualPrediction(ManualPredictionRequest request)

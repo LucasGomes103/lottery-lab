@@ -131,9 +131,7 @@ public sealed partial class PredictionService(Db db)
     public async Task<BankDayPredictionResponse> GenerateForBankDay(PredictionRequest request)
     {
         var bank = request.Bank.Trim();
-        var schedules = bank.Equals("LOOK LOTERIAS", StringComparison.OrdinalIgnoreCase)
-            ? new[] { "07:00", "09:00", "11:00", "14:00", "16:00", "18:00", "21:00", "23:00" }
-            : new[] { "02:00", "08:00", "10:00", "12:00", "15:00", "17:00", "21:00", "23:00" };
+        var schedules = BankSchedules(bank);
         var dailyRequest = request with { Bank = bank, Time = schedules[0] };
         DailyWindowChoice? dailyWindow = null;
         if (request.UseRecommendedWindow)
@@ -152,6 +150,28 @@ public sealed partial class PredictionService(Db db)
                 : $"A janela diária automática escolhida foi de {dailyWindow.WindowDays} dias, validada em {dailyWindow.EvaluatedDays} dias anteriores.") +
             " Cada horário é uma aposta e conferência independente.");
     }
+
+    // Equivale a gerar horário por horário: cada um usa a própria janela, semente e histórico até aquele horário.
+    public async Task<BankDayPredictionResponse> GenerateForBankDayEach(PredictionRequest request)
+    {
+        var bank = request.Bank.Trim();
+        var predictions = new List<PredictionResponse>();
+        foreach (var targetTime in BankSchedules(bank))
+            predictions.Add(await GenerateAndSaveInternal(request with { Bank = bank, Time = targetTime }));
+
+        var windows = predictions.Select(x => x.WindowDays).Distinct().Order().ToList();
+        return new BankDayPredictionResponse(predictions[0], predictions,
+            predictions.Sum(x => x.BetAmount),
+            $"Cada um dos {predictions.Count} horários da banca recebeu um cálculo próprio com {predictions[0].Quantity} números. " +
+            (request.UseRecommendedWindow
+                ? $"Foi usada a janela recomendada de cada horário ({string.Join(", ", windows)} dias)."
+                : "Foi usada a janela manual informada em todos os horários.") +
+            " Cada horário é uma aposta e conferência independente.");
+    }
+
+    internal static string[] BankSchedules(string bank) => bank.Trim().Equals("LOOK LOTERIAS", StringComparison.OrdinalIgnoreCase)
+        ? ["07:00", "09:00", "11:00", "14:00", "16:00", "18:00", "21:00", "23:00"]
+        : ["02:00", "08:00", "10:00", "12:00", "15:00", "17:00", "21:00", "23:00"];
 
     private async Task<DailyWindowChoice> RecommendDailyWindow(string bank, DateOnly targetDate, int quantity, TimeOnly baseTime)
     {

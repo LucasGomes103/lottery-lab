@@ -231,8 +231,13 @@
             <label>Quantidade de jogos <input type="number" min="1" [max]="maximumGenerationQuantity" [(ngModel)]="generationQuantity" (ngModelChange)="recalculatePayouts()"></label>
             <label>Posições <select [(ngModel)]="prizeRange" (ngModelChange)="recalculatePayouts()"><option *ngFor="let n of [1,2,3,4,5,6,7,8,9,10]" [ngValue]="n">{{n === 1 ? 'Só 1º' : '1º ao ' + n + 'º'}}</option></select></label>
           </div>
-          <label class="checkbox-line"><input type="checkbox" [(ngModel)]="generateForAllBankTimes"> Usar a mesma previsão em todos os {{schedulesFor().length}} horários da banca</label>
-          <p *ngIf="generateForAllBankTimes" class="muted">A lista é calculada uma vez e registrada em cada sorteio da banca. Total do dia: <strong>{{money(bankDayBetAmount())}}</strong>.</p>
+          <div class="segmented wrap" role="radiogroup" aria-label="Horários da geração">
+            <button type="button" role="radio" [class.active]="bankDayMode === 'single'" [attr.aria-checked]="bankDayMode === 'single'" (click)="bankDayMode = 'single'">Somente o horário base</button>
+            <button type="button" role="radio" [class.active]="bankDayMode === 'same'" [attr.aria-checked]="bankDayMode === 'same'" (click)="bankDayMode = 'same'">Mesma previsão em todos os horários</button>
+            <button type="button" role="radio" [class.active]="bankDayMode === 'each'" [attr.aria-checked]="bankDayMode === 'each'" (click)="bankDayMode = 'each'">Cálculo próprio para cada horário</button>
+          </div>
+          <p *ngIf="bankDayMode === 'same'" class="muted">A lista é calculada uma vez e registrada nos {{schedulesFor().length}} sorteios da banca. Total do dia: <strong>{{money(bankDayBetAmount())}}</strong>.</p>
+          <p *ngIf="bankDayMode === 'each'" class="muted">Cada um dos {{schedulesFor().length}} horários ({{schedulesFor().join(', ')}}) ganha a própria lista, como se você gerasse um a um. Total do dia: <strong>{{money(bankDayBetAmount())}}</strong>.</p>
           <details class="advanced" [open]="showAdvancedOptions" (toggle)="showAdvancedOptions = $any($event.target).open">
             <summary>Opções avançadas</summary>
             <div class="filters">
@@ -275,9 +280,9 @@
       </div>
 
       <div class="generate-bar">
-        <div><strong>{{generatorKind === 'hybrid' ? generationQuantity + ' jogos · ' + money(generateForAllBankTimes ? bankDayBetAmount() : betAmount) : ternoQuantity + ' ternos · ' + money(ternoTotalStake)}}</strong><span>{{bank === 'LT NACIONAL' ? 'Nacional' : 'Look'}} · {{generationDate | date:'dd/MM/yyyy'}} {{generateForAllBankTimes && generatorKind === 'hybrid' ? 'no dia inteiro' : 'às ' + time}} · janela de {{generationWindowDays}} dias</span></div>
+        <div><strong>{{generatorKind === 'hybrid' ? generationQuantity + ' jogos · ' + money(generateForAllBankTimes ? bankDayBetAmount() : betAmount) : ternoQuantity + ' ternos · ' + money(ternoTotalStake)}}</strong><span>{{bank === 'LT NACIONAL' ? 'Nacional' : 'Look'}} · {{generationDate | date:'dd/MM/yyyy'}} {{generateForAllBankTimes && generatorKind === 'hybrid' ? 'no dia inteiro' : 'às ' + time}} · {{bankDayMode === 'each' && generatorKind === 'hybrid' && useRecommendedWindow ? 'janela recomendada de cada horário' : 'janela de ' + generationWindowDays + ' dias'}}</span></div>
         <ng-container *ngIf="hasPermission('predictions.write')">
-          <button *ngIf="generatorKind === 'hybrid'" type="button" (click)="syncAnalysisContext(); generateNumbers()" [disabled]="generating">{{generating ? 'Calculando...' : 'Gerar jogos'}}</button>
+          <button *ngIf="generatorKind === 'hybrid'" type="button" (click)="syncAnalysisContext(); generateNumbers()" [disabled]="generating">{{generating ? 'Calculando...' : bankDayMode === 'each' ? 'Gerar jogos do dia (por horário)' : 'Gerar jogos'}}</button>
           <button *ngIf="generatorKind === 'terno'" type="button" (click)="syncAnalysisContext(); generateTernos()" [disabled]="generatingTernos">{{generatingTernos ? 'Gerando...' : 'Gerar e salvar ternos'}}</button>
         </ng-container>
       </div>
@@ -289,6 +294,10 @@
       <div *ngIf="!generation && !ternoGeneration" class="card empty-state"><h3>Nenhum jogo gerado ainda</h3><p class="muted">Gere jogos na primeira aba e o resultado aparece aqui.</p><button type="button" (click)="setAnalysisTab('generate')">Ir para Gerar jogos</button></div>
 
       <ng-container *ngIf="generation && (generatorKind === 'hybrid' || !ternoGeneration)">
+        <div *ngIf="dayGenerations.length" class="card">
+          <div class="section-head"><div><h3>Jogos do dia por horário</h3><p class="muted">{{dayGenerations.length}} cálculos independentes · total do dia {{money(dayGenerationsTotal())}}</p></div></div>
+          <div class="segmented wrap" role="tablist" aria-label="Horário exibido"><button type="button" role="tab" *ngFor="let item of dayGenerations" [class.active]="generation.id === item.id" [attr.aria-selected]="generation.id === item.id" (click)="showDayGeneration(item)">{{item.time}} · {{item.windowDays}}d</button></div>
+        </div>
         <div class="dashboard-grid">
           <div class="metric"><span>Total apostado</span><strong>{{money(generation.betAmount)}}</strong><small>por horário · {{generation.quantity}} jogos</small></div>
           <div class="metric centena"><span>Retorno por acerto</span><strong>{{money(generation.dezenaPayout)}}</strong><small>Dezena · C {{money(generation.centenaPayout)}} · M {{money(generation.milharPayout)}}</small></div>
