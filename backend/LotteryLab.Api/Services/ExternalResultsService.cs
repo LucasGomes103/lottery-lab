@@ -189,6 +189,13 @@ public sealed class ExternalResultsWorker(IServiceScopeFactory scopeFactory, ILo
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception) { logger.LogWarning(exception, "Sincronização da Mega-Sena será tentada novamente."); }
+            try
+            {
+                await using var scope = scopeFactory.CreateAsyncScope();
+                await scope.ServiceProvider.GetRequiredService<LotofacilResultsService>().SyncLatest(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception exception) { logger.LogWarning(exception, "Sincronização da Lotofácil será tentada novamente."); }
         } while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 
