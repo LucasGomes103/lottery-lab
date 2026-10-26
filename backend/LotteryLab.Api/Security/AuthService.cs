@@ -11,23 +11,42 @@ public sealed record AuthUser(Guid Id, string Username, string DisplayName, stri
 
 public sealed class AuthService(Db db, PasswordService passwords)
 {
+    private const int MaxFailedLogins = 10;
+
     public async Task<(string Token, AuthUser User)?> Login(string username, string password)
     {
         await using var connection = db.Open();
         var row = await connection.QuerySingleOrDefaultAsync<UserRow>(
             """
             select id,username,display_name as "DisplayName",password_hash as "PasswordHash",role,
-                   permissions,is_active as "IsActive",must_change_password as "MustChangePassword"
+                   permissions,is_active as "IsActive",must_change_password as "MustChangePassword",
+                   coalesce(locked_until>now(),false) as "IsLocked"
             from app_users where lower(username)=lower(@username)
             """, new { username = username.Trim() });
-        if (row is null || !row.IsActive || !passwords.Verify(password, row.PasswordHash)) return null;
+        // Usuário inexistente, inativo ou bloqueado ainda paga o custo do PBKDF2, para o tempo de resposta não revelar nada.
+        if (row is null || !row.IsActive || row.IsLocked)
+        {
+            passwords.VerifyDummy(password);
+            return null;
+        }
+        if (!passwords.Verify(password, row.PasswordHash))
+        {
+            await connection.ExecuteAsync(
+                """
+                update app_users set
+                    failed_logins=case when failed_logins+1>=@max then 0 else failed_logins+1 end,
+                    locked_until=case when failed_logins+1>=@max then now()+interval '15 minutes' else locked_until end
+                where id=@id
+                """, new { row.Id, max = MaxFailedLogins });
+            return null;
+        }
 
         var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48))
             .Replace('+', '-').Replace('/', '_').TrimEnd('=');
         await connection.ExecuteAsync(
             "insert into auth_sessions(id,user_id,token_hash,expires_at) values(@id,@userId,@hash,now()+interval '7 days')",
             new { id = Guid.NewGuid(), userId = row.Id, hash = TokenHash(token) });
-        await connection.ExecuteAsync("update app_users set last_login_at=now() where id=@id", new { row.Id });
+        await connection.ExecuteAsync("update app_users set last_login_at=now(),failed_logins=0,locked_until=null where id=@id", new { row.Id });
         return (token, ToUser(row));
     }
 
@@ -93,7 +112,7 @@ public sealed class AuthService(Db db, PasswordService passwords)
             new { id, displayName = displayName.Trim(), isActive, permissions = NormalizePermissions(permissions) });
         if (count > 0 && !string.IsNullOrWhiteSpace(newPassword))
         {
-            await connection.ExecuteAsync("update app_users set password_hash=@hash,must_change_password=true where id=@id", new { id, hash = passwords.Hash(newPassword) });
+            await connection.ExecuteAsync("update app_users set password_hash=@hash,must_change_password=true,failed_logins=0,locked_until=null where id=@id", new { id, hash = passwords.Hash(newPassword) });
             await connection.ExecuteAsync("delete from auth_sessions where user_id=@id", new { id });
         }
         if (!isActive) await connection.ExecuteAsync("delete from auth_sessions where user_id=@id", new { id });
@@ -136,5 +155,6 @@ public sealed class AuthService(Db db, PasswordService passwords)
         public string[] Permissions { get; set; } = [];
         public bool IsActive { get; set; }
         public bool MustChangePassword { get; set; }
+        public bool IsLocked { get; set; }
     }
 }

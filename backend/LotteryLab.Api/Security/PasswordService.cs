@@ -5,6 +5,10 @@ namespace LotteryLab.Api.Security;
 public sealed class PasswordService
 {
     private const int Iterations = 210_000;
+    // Hash de uma senha aleatória, para que o login de usuário inexistente custe o mesmo que o de um real.
+    private readonly string dummyHash;
+
+    public PasswordService() => dummyHash = Hash(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
 
     public string Hash(string password)
     {
@@ -26,6 +30,8 @@ public sealed class PasswordService
         }
         catch (FormatException) { return false; }
     }
+
+    public bool VerifyDummy(string password) => Verify(password, dummyHash);
 
     public static string? Validate(string password)
     {

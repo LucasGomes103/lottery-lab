@@ -25,6 +25,8 @@ public sealed class AuthSchema(Db db)
             last_login_at timestamptz
         );
         create unique index if not exists ux_app_users_username on app_users(lower(username));
+        alter table app_users add column if not exists failed_logins int not null default 0;
+        alter table app_users add column if not exists locked_until timestamptz;
 
         create table if not exists auth_sessions (
             id uuid primary key,

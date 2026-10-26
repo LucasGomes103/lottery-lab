@@ -18,6 +18,14 @@ public sealed class PasswordServiceTests
         Assert.False(service.Verify("SenhaErrada@2026", first));
     }
 
+    [Fact]
+    public void DummyHashNeverAcceptsAPassword()
+    {
+        var service = new PasswordService();
+        Assert.False(service.VerifyDummy("SenhaForte@2026"));
+        Assert.False(service.VerifyDummy(""));
+    }
+
     [Theory]
     [InlineData("curta", false)]
     [InlineData("somenteletrasminusculas", false)]

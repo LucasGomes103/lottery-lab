@@ -2,6 +2,7 @@ using LotteryLab.Api.Data;
 using LotteryLab.Api.Security;
 using LotteryLab.Api.Services;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.HttpOverrides;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,6 +21,14 @@ builder.Services.AddAuthorization(options =>
 {
     foreach (var permission in Permissions.All)
         options.AddPolicy(permission, policy => policy.RequireClaim("permission", permission));
+});
+// No Render a API fica atrás de um único proxy; sem isso o limitador de login veria só o IP do proxy.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+    options.ForwardLimit = 1;
 });
 builder.Services.AddRateLimiter(options =>
 {
@@ -93,6 +102,7 @@ app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
     }
     catch (Exception error) { app.Logger.LogError(error, "Falha ao reavaliar previsões na inicialização."); }
 }));
+app.UseForwardedHeaders();
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 app.UseRouting();
 app.UseCors("web");
@@ -102,6 +112,8 @@ app.Use(async (context, next) =>
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["X-Frame-Options"] = "DENY";
     context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    if (!app.Environment.IsDevelopment())
+        context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
     await next();
 });
 app.UseAuthentication();
