@@ -6,7 +6,9 @@
 
 <ng-container *ngIf="currentUser && !currentUser.mustChangePassword">
 <div class="app-shell">
-<aside class="sidebar"><div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></span><div><h1>Lottery Lab</h1><p>Dados, estatísticas e previsões</p></div></div>
+<header class="topbar"><button type="button" class="menu-toggle" aria-label="Abrir menu" aria-controls="app-drawer" [attr.aria-expanded]="menuOpen" (click)="openMenu()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></span><strong class="topbar-title">Lottery Lab</strong></header>
+<div class="drawer-backdrop" [class.open]="menuOpen" (click)="closeMenu()" aria-hidden="true"></div>
+<aside id="app-drawer" class="sidebar" [class.open]="menuOpen" [attr.inert]="menuOpen ? null : ''" aria-label="Menu de navegação"><button type="button" class="drawer-close" aria-label="Fechar menu" (click)="closeMenu()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button><div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></span><div><h1>Lottery Lab</h1><p>Dados, estatísticas e previsões</p></div></div>
 <nav aria-label="Menu principal">
 <button *ngIf="hasPermission('imports.write')" [class.active]="activeSection === 'import'" (click)="navigate('import')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Importação</button>
 <button *ngIf="hasPermission('history.read')" [class.active]="activeSection === 'history'" (click)="navigate('history')"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg>Base histórica</button>
@@ -20,7 +22,7 @@
 </nav>
 <div class="sidebar-footer"><div class="sidebar-user"><span class="avatar" aria-hidden="true">{{(currentUser.displayName || currentUser.username || '?').charAt(0).toUpperCase()}}</span><div><strong>{{currentUser.displayName || currentUser.username}}</strong><small>{{currentUser.username}}</small></div></div>
 <button [class.active]="activeSection === 'account'" (click)="navigate('account')"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg>Minha conta</button>
-<button (click)="logout()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3M10 16l4-4-4-4M14 12H4"/></svg>Sair</button></div>
+<button (click)="closeMenu(); logout()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3M10 16l4-4-4-4M14 12H4"/></svg>Sair</button></div>
 </aside>
 <main>
   <p *ngIf="message" class="notice success">{{message}}</p>

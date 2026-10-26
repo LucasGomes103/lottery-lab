@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, HostListener, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
@@ -298,10 +298,16 @@ export class AppComponent implements OnInit {
         if (this.hasPermission('users.manage')) this.loadUsers();
     }
 
-    private finishLogout() { localStorage.removeItem('lotteryLabToken'); this.currentUser = null; }
+    private finishLogout() { localStorage.removeItem('lotteryLabToken'); this.currentUser = null; this.closeMenu(); }
+
+    // Menu em gaveta (hambúrguer): trava a rolagem da página enquanto está aberto.
+    menuOpen = false;
+    openMenu() { this.menuOpen = true; document.body.classList.add('menu-open'); }
+    @HostListener('document:keydown.escape') closeMenu() { this.menuOpen = false; document.body.classList.remove('menu-open'); }
 
     navigate(section: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'megasena' | 'lotofacil' | 'dashboard' | 'users' | 'account') {
         this.activeSection = section;
+        this.closeMenu();
         this.error = '';
         this.message = '';
         if (section === 'history') this.loadHistory(this.historyPage);
