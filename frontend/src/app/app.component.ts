@@ -54,7 +54,7 @@ export class AppComponent implements OnInit {
     editingIds: number[] = [];
     selectedHistoryIds = new Set<number>();
     history: HistoryItem[] = [];
-    activeSection: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'megasena' | 'dashboard' | 'users' | 'account' = 'import';
+    activeSection: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'megasena' | 'lotofacil' | 'dashboard' | 'users' | 'account' = 'import';
     historyBank = 'LT NACIONAL';
     historyStartDate = '';
     historyEndDate = '';
@@ -188,6 +188,37 @@ export class AppComponent implements OnInit {
     wheelSaved: any = null;
     private wheelPreviewTimer: ReturnType<typeof setTimeout> | null = null;
     private wheelPreviewSequence = 0;
+    lotoTab: 'generate' | 'history' | 'results' = 'generate';
+    lotoTargetContest: number | null = null;
+    lotoQuantity = 5;
+    lotoNumbersPerGame = 15;
+    lotoWindowContests = 100;
+    lotoSeed: number | null = null;
+    lotoGenerating = false;
+    lotoGeneration: any = null;
+    lotoPredictions: any[] = [];
+    lotoPredictionPage = 1;
+    lotoPredictionTotalPages = 1;
+    lotoPredictionTotal = 0;
+    loadingLotoPredictions = false;
+    selectedLotoPrediction: any = null;
+    selectedLotoIds = new Set<string>();
+    deletingLoto = false;
+    lotoDraws: any[] = [];
+    lotoDrawPage = 1;
+    lotoDrawTotalPages = 1;
+    lotoDrawTotal = 0;
+    lotoLatestContest: number | null = null;
+    lotoMissingDraws = 0;
+    loadingLotoDraws = false;
+    lotoSyncJob: any = null;
+    lotoSyncingHistory = false;
+    lotoSyncingLatest = false;
+    private lotoSyncPoll: ReturnType<typeof setInterval> | null = null;
+    lotoStatistics: any = null;
+    loadingLotoStatistics = false;
+    readonly lotoBetPrice = 3.5;
+    readonly lotoSizes = [15, 16, 17, 18, 19, 20];
     authReady = false;
     currentUser: any = null;
     loginUsername = '';
@@ -252,21 +283,22 @@ export class AppComponent implements OnInit {
         if (this.hasPermission('imports.write')) { this.activeSection = 'import'; this.loadExternalSyncStatus(); }
         else if (this.hasPermission('history.read')) { this.activeSection = 'history'; this.loadHistory(1); }
         else if (this.hasPermission('predictions.read')) { this.activeSection = 'predictions'; this.loadPredictionHistory(1); }
-        else if (this.hasPermission('dashboard.read')) { this.activeSection = 'dashboard'; this.loadDashboard(); this.loadMegaStatistics(); }
+        else if (this.hasPermission('dashboard.read')) { this.activeSection = 'dashboard'; this.loadDashboard(); this.loadMegaStatistics(); this.loadLotoStatistics(); }
         else if (this.hasPermission('analysis.use')) this.activeSection = 'analysis';
         if (this.hasPermission('users.manage')) this.loadUsers();
     }
 
     private finishLogout() { localStorage.removeItem('lotteryLabToken'); this.currentUser = null; }
 
-    navigate(section: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'megasena' | 'dashboard' | 'users' | 'account') {
+    navigate(section: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'megasena' | 'lotofacil' | 'dashboard' | 'users' | 'account') {
         this.activeSection = section;
         this.error = '';
         this.message = '';
         if (section === 'history') this.loadHistory(this.historyPage);
         if (section === 'predictions') this.loadPredictionHistory(this.predictionPage);
-        if (section === 'dashboard') { this.loadDashboard(); this.loadMegaStatistics(); }
+        if (section === 'dashboard') { this.loadDashboard(); this.loadMegaStatistics(); this.loadLotoStatistics(); }
         if (section === 'megasena') this.openMegaTab(this.megaTab);
+        if (section === 'lotofacil') this.openLotoTab(this.lotoTab);
         if (section === 'users') this.loadUsers();
         if (section === 'analysis') this.openAnalysis();
     }
@@ -1511,6 +1543,146 @@ export class AppComponent implements OnInit {
         this.http.get<any>(this.api + `/megasena/backtest?${params}`).subscribe({
             next: response => { this.megaBacktest = response; this.loadingMegaBacktest = false; },
             error: error => { this.error = this.errorMessage(error); this.loadingMegaBacktest = false; }
+        });
+    }
+
+    openLotoTab(tab: 'generate' | 'history' | 'results') {
+        this.lotoTab = tab;
+        if (tab === 'history') this.loadLotoPredictions(this.lotoPredictionPage);
+        if (tab === 'results') { this.loadLotoDraws(this.lotoDrawPage); if (this.hasPermission('imports.write')) this.loadLotoSyncStatus(); }
+    }
+
+    lotoGameCost(numbersPerGame = this.lotoNumbersPerGame) { return this.megaCombinations(Number(numbersPerGame) || 15, 15) * this.lotoBetPrice; }
+
+    lotoTotalCost() { return this.lotoGameCost() * (Number(this.lotoQuantity) || 0); }
+
+    generateLotofacil() {
+        if (this.lotoGenerating) return;
+        this.lotoGenerating = true; this.error = ''; this.message = '';
+        const body: any = { quantity: Number(this.lotoQuantity), numbersPerGame: Number(this.lotoNumbersPerGame), windowContests: Number(this.lotoWindowContests) };
+        if (this.lotoTargetContest) body.targetContest = Number(this.lotoTargetContest);
+        if (this.lotoSeed !== null && String(this.lotoSeed) !== '') body.seed = Number(this.lotoSeed);
+        this.http.post<any>(this.api + '/lotofacil/generate', body).subscribe({
+            next: response => { this.lotoGeneration = response; this.lotoGenerating = false; this.message = `${response.quantity} jogos gerados para o concurso ${response.targetContest}.`; },
+            error: error => { this.error = this.errorMessage(error); this.lotoGenerating = false; }
+        });
+    }
+
+    lotoPrizeSummary(item: any) {
+        return [15, 14, 13, 12, 11].filter(tier => item['count' + tier]).map(tier => `${item['count' + tier]}× ${tier} pts`).join(' · ');
+    }
+
+    loadLotoPredictions(page = 1) {
+        this.loadingLotoPredictions = true;
+        this.http.get<any>(this.api + `/lotofacil/predictions?page=${Math.max(1, page)}&pageSize=20`).subscribe({
+            next: response => {
+                this.lotoPredictions = response.items; this.lotoPredictionPage = response.page;
+                this.lotoPredictionTotalPages = response.totalPages; this.lotoPredictionTotal = response.total;
+                this.selectedLotoIds = new Set([...this.selectedLotoIds].filter(id => response.items.some((x: any) => x.id === id)));
+                this.loadingLotoPredictions = false;
+            },
+            error: error => { this.error = this.errorMessage(error); this.loadingLotoPredictions = false; }
+        });
+    }
+
+    openLotoPrediction(id: string) {
+        this.http.get<any>(this.api + `/lotofacil/predictions/${id}`).subscribe({
+            next: response => this.selectedLotoPrediction = response,
+            error: error => this.error = this.errorMessage(error)
+        });
+    }
+
+    toggleLotoSelection(id: string, checked: boolean) {
+        if (checked) this.selectedLotoIds.add(id); else this.selectedLotoIds.delete(id);
+        this.selectedLotoIds = new Set(this.selectedLotoIds);
+    }
+
+    toggleAllLoto(checked: boolean) {
+        this.selectedLotoIds = checked ? new Set(this.lotoPredictions.map(x => x.id)) : new Set<string>();
+    }
+
+    deleteSelectedLoto() {
+        if (!this.selectedLotoIds.size || this.deletingLoto) return;
+        if (!window.confirm(`Excluir ${this.selectedLotoIds.size} registro(s) de jogos da Lotofácil?`)) return;
+        this.deletingLoto = true;
+        this.http.post<any>(this.api + '/lotofacil/predictions/delete-batch', { ids: [...this.selectedLotoIds] }).subscribe({
+            next: response => {
+                this.message = `${response.deleted} registro(s) excluído(s).`; this.deletingLoto = false;
+                if (this.selectedLotoPrediction && this.selectedLotoIds.has(this.selectedLotoPrediction.id)) this.selectedLotoPrediction = null;
+                this.selectedLotoIds = new Set<string>(); this.loadLotoPredictions(this.lotoPredictionPage);
+            },
+            error: error => { this.error = this.errorMessage(error); this.deletingLoto = false; }
+        });
+    }
+
+    loadLotoDraws(page = 1) {
+        this.loadingLotoDraws = true;
+        this.http.get<any>(this.api + `/lotofacil/draws?page=${Math.max(1, page)}&pageSize=20`).subscribe({
+            next: response => {
+                this.lotoDraws = response.items; this.lotoDrawPage = response.page; this.lotoDrawTotalPages = response.totalPages;
+                this.lotoDrawTotal = response.total; this.lotoLatestContest = response.latestContest; this.lotoMissingDraws = response.missing;
+                this.loadingLotoDraws = false;
+            },
+            error: error => { this.error = this.errorMessage(error); this.loadingLotoDraws = false; }
+        });
+    }
+
+    syncLotoLatest() {
+        if (this.lotoSyncingLatest) return;
+        this.lotoSyncingLatest = true; this.error = '';
+        this.http.post<any>(this.api + '/lotofacil/sync-latest', {}).subscribe({
+            next: draw => { this.lotoSyncingLatest = false; this.message = `Concurso ${draw.contest} sincronizado.`; this.loadLotoDraws(1); },
+            error: error => { this.error = this.errorMessage(error); this.lotoSyncingLatest = false; }
+        });
+    }
+
+    syncLotoHistory() {
+        if (this.lotoSyncingHistory) return;
+        this.lotoSyncingHistory = true; this.error = '';
+        this.http.post<any>(this.api + '/lotofacil/sync-history', {}).subscribe({
+            next: job => { this.lotoSyncJob = job; this.pollLotoSync(); },
+            error: error => { this.error = this.errorMessage(error); this.lotoSyncingHistory = false; }
+        });
+    }
+
+    private loadLotoSyncStatus() {
+        this.http.get<any>(this.api + '/lotofacil/sync-history/status').subscribe({
+            next: job => {
+                if (job.status === 'IDLE') { this.lotoSyncJob = job.automatic?.lastAttempt ? { automatic: job.automatic } : null; return; }
+                this.lotoSyncJob = job;
+                if (job.status === 'RUNNING') { this.lotoSyncingHistory = true; this.pollLotoSync(); }
+            },
+            error: () => { }
+        });
+    }
+
+    private pollLotoSync() {
+        if (this.lotoSyncPoll) clearInterval(this.lotoSyncPoll);
+        const poll = () => this.http.get<any>(this.api + '/lotofacil/sync-history/status').subscribe({
+            next: job => {
+                this.lotoSyncJob = job;
+                if (job.status === 'RUNNING') return;
+                this.lotoSyncingHistory = false; this.stopLotoSyncPoll();
+                if (job.status === 'FAILED') this.error = job.error || 'A carga histórica da Lotofácil falhou.';
+                else this.message = `Carga concluída: ${job.result?.imported ?? 0} concursos importados.`;
+                this.loadLotoDraws(1);
+            },
+            error: error => { this.error = this.errorMessage(error); this.lotoSyncingHistory = false; this.stopLotoSyncPoll(); }
+        });
+        poll(); this.lotoSyncPoll = setInterval(poll, 1500);
+    }
+
+    private stopLotoSyncPoll() {
+        if (this.lotoSyncPoll) clearInterval(this.lotoSyncPoll);
+        this.lotoSyncPoll = null;
+    }
+
+    loadLotoStatistics() {
+        if (!this.hasPermission('dashboard.read')) return;
+        this.loadingLotoStatistics = true;
+        this.http.get<any>(this.api + '/lotofacil/statistics').subscribe({
+            next: response => { this.lotoStatistics = response; this.loadingLotoStatistics = false; },
+            error: error => { this.error = this.errorMessage(error); this.loadingLotoStatistics = false; }
         });
     }
 

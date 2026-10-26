@@ -104,6 +104,7 @@ th,td{padding:8px;text-align:left;vertical-align:middle}th{padding-block:10px}th
 .mega-stat{display:inline-flex;align-items:center;gap:4px;margin:3px 10px 3px 0;color:var(--muted);font-size:12px}.mega-dashboard{margin-top:20px}.mega-dashboard .dashboard-columns{grid-template-columns:repeat(3,minmax(0,1fr))}
 .mega-scores{margin-top:14px}.mega-scores summary{cursor:pointer;font-weight:600}.mega-backtest table td,.mega-backtest table th{white-space:nowrap}
 .mega-errors{max-height:160px;margin:8px 0 0;padding-left:18px;overflow:auto;color:var(--negative);font-size:12px}
+.mega-ball.loto{border-color:#930089;color:#5c0057}.mega-ball.loto.hit,.mega-ball.loto.drawn{background:#930089;color:#fff}
 .wheel-grid{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:6px;max-width:480px;margin:14px 0 4px}.wheel-ball{aspect-ratio:1;min-height:0;padding:0;border:2px solid #079455;border-radius:50%;background:#fff;color:#054f31;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;font-weight:700}.wheel-ball:hover:not(:disabled){filter:none;background:#ecfdf3}.wheel-ball.selected{background:#079455;color:#fff}
 .wheel-actions{align-items:flex-end}.wheel-tag{margin-left:6px}
 
