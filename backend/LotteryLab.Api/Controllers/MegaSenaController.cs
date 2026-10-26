@@ -3,6 +3,7 @@ using LotteryLab.Api.Security;
 using LotteryLab.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace LotteryLab.Api.Controllers;
 
@@ -10,8 +11,58 @@ namespace LotteryLab.Api.Controllers;
 [Route("api/megasena")]
 [Authorize]
 public sealed class MegaSenaController(MegaSenaService megaSena, MegaSenaResultsService results,
-    MegaSenaHistoryJobService historyJobs) : ControllerBase
+    MegaSenaHistoryJobService historyJobs, MegaSenaWheelService wheels, IMemoryCache cache) : ControllerBase
 {
+    [HttpGet("fechamento/garantias")]
+    [Authorize(Policy = Permissions.PredictionsWrite)]
+    public IActionResult WheelGuarantees() =>
+        Ok(MegaSenaWheelService.Guarantees.Select(g => new { g.Code, g.Label, g.Prize, g.IfDrawn }));
+
+    [HttpPost("fechamento/preview")]
+    [Authorize(Policy = Permissions.PredictionsWrite)]
+    public IActionResult WheelPreview(MegaSenaWheelRequest request)
+    {
+        try { return Ok(WheelDto(BuildWheel(request))); }
+        catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
+    }
+
+    [HttpPost("fechamento")]
+    [Authorize(Policy = Permissions.PredictionsWrite)]
+    public async Task<IActionResult> WheelSave(MegaSenaWheelRequest request)
+    {
+        try { return Ok(await megaSena.SaveWheel(BuildWheel(request), request.Label)); }
+        catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
+    }
+
+    [HttpGet("fechamento/sugestao")]
+    [Authorize(Policy = Permissions.PredictionsWrite)]
+    public async Task<IActionResult> WheelSuggestion(int quantidade = 10)
+    {
+        try { return Ok(await megaSena.SuggestWheelNumbers(quantidade)); }
+        catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
+    }
+
+    // Com 20 dezenas o cálculo leva vários segundos; o resultado (ou o erro) fica em cache para a prévia e a gravação.
+    private WheelResult BuildWheel(MegaSenaWheelRequest request)
+    {
+        var numbers = (request.Numbers ?? []).Distinct().Order().ToArray();
+        var guarantee = (request.Guarantee ?? "4se4").ToLowerInvariant();
+        var outcome = cache.GetOrCreate($"megasena-fechamento:{guarantee}:{string.Join(',', numbers)}", entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30);
+            try { return (object)wheels.Build(numbers, guarantee); }
+            catch (ArgumentException error) { return error.Message; }
+        });
+        return outcome as WheelResult ?? throw new ArgumentException((string)outcome!);
+    }
+
+    private static object WheelDto(WheelResult wheel) => new
+    {
+        numbers = wheel.Numbers, guarantee = wheel.Guarantee.Code, games = wheel.Games, gameCount = wheel.Games.Count,
+        cost = wheel.Games.Count * MegaSenaService.BetPrice, fullCombinations = wheel.FullCombinations,
+        fullCost = wheel.FullCombinations * MegaSenaService.BetPrice
+    };
+
     [HttpPost("sync-history")]
     [Authorize(Policy = Permissions.ImportsWrite)]
     public IActionResult SyncHistory() => Accepted(historyJobs.Start());

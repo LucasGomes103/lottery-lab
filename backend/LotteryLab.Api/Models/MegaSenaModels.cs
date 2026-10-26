@@ -7,6 +7,8 @@ public record MegaSenaDraw(int Contest, DateOnly DrawDate, int[] Numbers,
 public record MegaSenaGenerateRequest(int? TargetContest = null, int Quantity = 5, int NumbersPerGame = 6,
     int WindowContests = 100, long? Seed = null);
 
+public record MegaSenaWheelRequest(int[]? Numbers, string? Guarantee = "4se4", string? Label = null);
+
 public record MegaSenaNumberFeatures(double WindowFrequency, double HistoryFrequency, double Delay,
     double Momentum, double PairAffinity);
 

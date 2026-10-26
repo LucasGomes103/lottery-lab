@@ -19,7 +19,7 @@ create table if not exists megasena_predictions (
   generated_at timestamptz not null default now(), seed bigint not null,
   window_contests integer not null,
   numbers_per_game integer not null check(numbers_per_game between 6 and 15),
-  quantity integer not null check(quantity between 1 and 50),
+  quantity integer not null constraint megasena_predictions_quantity_max500 check(quantity between 1 and 500),
   total_cost numeric(14,2) not null check(total_cost > 0),
   config jsonb not null, scores jsonb not null,
   status varchar(30) not null default 'PENDING'

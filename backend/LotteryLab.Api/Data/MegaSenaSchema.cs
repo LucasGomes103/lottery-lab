@@ -50,5 +50,14 @@ public sealed class MegaSenaSchema(Db db)
             numbers smallint[] not null,
             primary key(prediction_id, rank)
         );
+
+        -- Fechamentos gravam até 500 jogos por registro; o limite original era 50.
+        do $$
+        begin
+            if not exists (select 1 from pg_constraint where conname = 'megasena_predictions_quantity_max500') then
+                alter table megasena_predictions drop constraint if exists megasena_predictions_quantity_check;
+                alter table megasena_predictions add constraint megasena_predictions_quantity_max500 check(quantity between 1 and 500);
+            end if;
+        end $$;
         """;
 }

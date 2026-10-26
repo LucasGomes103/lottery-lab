@@ -140,7 +140,7 @@ export class AppComponent implements OnInit {
     dashboardEndDate = '';
     dashboardTime = '';
     generating = false;
-    megaTab: 'generate' | 'history' | 'results' = 'generate';
+    megaTab: 'generate' | 'fechamento' | 'history' | 'results' = 'generate';
     megaTargetContest: number | null = null;
     megaQuantity = 5;
     megaNumbersPerGame = 6;
@@ -175,6 +175,19 @@ export class AppComponent implements OnInit {
     megaBacktestNumbers = 6;
     megaBacktestQuantity = 5;
     readonly megaBetPrice = 6;
+    readonly megaGrid = Array.from({ length: 60 }, (_, i) => i + 1);
+    wheelNumbers = new Set<number>();
+    wheelGuarantees: any[] = [];
+    wheelGuarantee = '4se4';
+    wheelSuggestQuantity = 10;
+    wheelSuggesting = false;
+    wheelPreview: any = null;
+    wheelPreviewError = '';
+    wheelPreviewLoading = false;
+    wheelSaving = false;
+    wheelSaved: any = null;
+    private wheelPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+    private wheelPreviewSequence = 0;
     authReady = false;
     currentUser: any = null;
     loginUsername = '';
@@ -1284,8 +1297,9 @@ export class AppComponent implements OnInit {
         this.http.post<any>(this.api + '/ai/analyze', { bank: this.bank, time: this.analysisTime, windowDays: this.windowDays, question: 'Compare continuidade, atraso, reversão e o ranking híbrido com base nos dados disponíveis.' }).subscribe(x => this.ai = x.answer);
     }
 
-    openMegaTab(tab: 'generate' | 'history' | 'results') {
+    openMegaTab(tab: 'generate' | 'fechamento' | 'history' | 'results') {
         this.megaTab = tab;
+        if (tab === 'fechamento' && !this.wheelGuarantees.length) this.loadWheelGuarantees();
         if (tab === 'history') this.loadMegaPredictions(this.megaPredictionPage);
         if (tab === 'results') { this.loadMegaDraws(this.megaDrawPage); if (this.hasPermission('imports.write')) this.loadMegaSyncStatus(); }
     }
@@ -1314,6 +1328,60 @@ export class AppComponent implements OnInit {
         this.http.post<any>(this.api + '/megasena/generate', body).subscribe({
             next: response => { this.megaGeneration = response; this.megaGenerating = false; this.message = `${response.quantity} jogos gerados para o concurso ${response.targetContest}.`; },
             error: error => { this.error = this.errorMessage(error); this.megaGenerating = false; }
+        });
+    }
+
+    loadWheelGuarantees() {
+        this.http.get<any[]>(this.api + '/megasena/fechamento/garantias').subscribe({
+            next: guarantees => this.wheelGuarantees = guarantees,
+            error: error => this.error = this.errorMessage(error)
+        });
+    }
+
+    megaBallList(values: number[] | null | undefined) { return (values || []).map(n => this.megaBall(n)).join(' '); }
+
+    toggleWheelNumber(n: number) {
+        if (this.wheelNumbers.has(n)) this.wheelNumbers.delete(n);
+        else if (this.wheelNumbers.size < 20) this.wheelNumbers.add(n);
+        this.wheelNumbers = new Set(this.wheelNumbers);
+        this.scheduleWheelPreview();
+    }
+
+    selectWheelGuarantee(code: string) { this.wheelGuarantee = code; this.scheduleWheelPreview(); }
+
+    clearWheel() { this.wheelNumbers = new Set<number>(); this.wheelSaved = null; this.scheduleWheelPreview(); }
+
+    suggestWheel() {
+        if (this.wheelSuggesting) return;
+        const quantity = Math.min(20, Math.max(7, Number(this.wheelSuggestQuantity) || 10));
+        this.wheelSuggestQuantity = quantity; this.wheelSuggesting = true; this.error = '';
+        this.http.get<any>(this.api + `/megasena/fechamento/sugestao?quantidade=${quantity}`).subscribe({
+            next: response => { this.wheelNumbers = new Set<number>(response.numbers); this.wheelSuggesting = false; this.scheduleWheelPreview(); },
+            error: error => { this.error = this.errorMessage(error); this.wheelSuggesting = false; }
+        });
+    }
+
+    // O cálculo pode levar segundos com 20 dezenas: espera o usuário parar de clicar e descarta respostas antigas.
+    private scheduleWheelPreview() {
+        if (this.wheelPreviewTimer) clearTimeout(this.wheelPreviewTimer);
+        const sequence = ++this.wheelPreviewSequence;
+        this.wheelPreviewError = '';
+        if (this.wheelNumbers.size < 7 || this.wheelNumbers.size > 20) { this.wheelPreview = null; this.wheelPreviewLoading = false; return; }
+        this.wheelPreviewLoading = true;
+        this.wheelPreviewTimer = setTimeout(() => {
+            this.http.post<any>(this.api + '/megasena/fechamento/preview', { numbers: [...this.wheelNumbers], guarantee: this.wheelGuarantee }).subscribe({
+                next: response => { if (sequence !== this.wheelPreviewSequence) return; this.wheelPreview = response; this.wheelPreviewLoading = false; },
+                error: error => { if (sequence !== this.wheelPreviewSequence) return; this.wheelPreview = null; this.wheelPreviewError = this.errorMessage(error); this.wheelPreviewLoading = false; }
+            });
+        }, 500);
+    }
+
+    saveWheel() {
+        if (this.wheelSaving || this.wheelNumbers.size < 7 || this.wheelNumbers.size > 20) return;
+        this.wheelSaving = true; this.error = ''; this.message = '';
+        this.http.post<any>(this.api + '/megasena/fechamento', { numbers: [...this.wheelNumbers], guarantee: this.wheelGuarantee }).subscribe({
+            next: response => { this.wheelSaved = response; this.wheelSaving = false; this.message = `Fechamento com ${response.quantity} jogos salvo para o concurso ${response.targetContest}.`; },
+            error: error => { this.error = this.errorMessage(error); this.wheelSaving = false; }
         });
     }
 

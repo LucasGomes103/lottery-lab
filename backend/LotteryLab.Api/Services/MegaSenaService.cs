@@ -5,7 +5,7 @@ using LotteryLab.Api.Models;
 
 namespace LotteryLab.Api.Services;
 
-public sealed class MegaSenaService(Db db)
+public sealed partial class MegaSenaService(Db db)
 {
     public const decimal BetPrice = 6.00m;
     public const long SimpleBetOdds = 50_063_860;
