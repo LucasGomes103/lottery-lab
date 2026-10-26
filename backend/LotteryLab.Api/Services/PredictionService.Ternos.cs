@@ -105,19 +105,20 @@ public sealed partial class PredictionService
 
     public static decimal TernoPayout(decimal totalStake, int quantity) => Math.Round(totalStake / quantity * 13000m, 2);
 
-    public async Task<object> ListTernos(string? bank, int page = 1)
+    public async Task<object> ListTernos(string? bank, int page = 1, int pageSize = 20)
     {
         page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 5, 100);
         await using var connection = db.Open();
-        var args = new { bank = string.IsNullOrWhiteSpace(bank) ? null : bank.Trim(), offset = (page - 1) * 20 };
+        var args = new { bank = string.IsNullOrWhiteSpace(bank) ? null : bank.Trim(), offset = (page - 1) * pageSize, pageSize };
         var total = await connection.ExecuteScalarAsync<int>("select count(*) from terno_predictions where (@bank::text is null or bank=@bank)", args);
-        page = Math.Min(page, Math.Max(1, (int)Math.Ceiling(total / 20d)));
-        args = new { args.bank, offset = (page - 1) * 20 };
+        page = Math.Min(page, Math.Max(1, (int)Math.Ceiling(total / (double)pageSize)));
+        args = new { args.bank, offset = (page - 1) * pageSize, pageSize };
         var ids = await connection.QueryAsync<Guid>(
-            "select id from terno_predictions where (@bank::text is null or bank=@bank) order by generated_at desc,id offset @offset limit 20", args);
+            "select id from terno_predictions where (@bank::text is null or bank=@bank) order by generated_at desc,id offset @offset limit @pageSize", args);
         var items = new List<object>();
         foreach (var id in ids) if (await GetTerno(id, includeGames: false) is { } item) items.Add(item);
-        return new { items, total, page, totalPages = (int)Math.Ceiling(total / 20d) };
+        return new { items, total, page, pageSize, totalPages = (int)Math.Ceiling(total / (double)pageSize) };
     }
 
     public async Task<int> DeleteTernos(List<Guid> ids)

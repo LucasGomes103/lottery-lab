@@ -365,7 +365,7 @@ public sealed class ApiController(Db db, PdfImportService pdf, AnalysisService a
 
     [HttpGet("ternos")]
     [Authorize(Policy = Permissions.PredictionsRead)]
-    public async Task<IActionResult> ListTernos(string? bank = null, int page = 1) => Ok(await predictions.ListTernos(bank, page));
+    public async Task<IActionResult> ListTernos(string? bank = null, int page = 1, int pageSize = 20) => Ok(await predictions.ListTernos(bank, page, pageSize));
 
     [HttpPost("ternos/delete-batch")]
     [Authorize(Policy = Permissions.PredictionsWrite)]

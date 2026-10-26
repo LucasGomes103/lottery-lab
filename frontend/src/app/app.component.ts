@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { forkJoin, TimeoutError, timeout } from 'rxjs';
+import { ClientPager, DEFAULT_PAGE_SIZE, PagerComponent } from './pager.component';
 
 interface ParsedResult { position: number; number: string; milhar: string | null; centena: string | null; dezena: string | null; group: number | null; animal: string | null; }
 interface ParsedExtraction { date: string | null; bank: string; time: string | null; results: ParsedResult[]; warnings: string[]; }
@@ -14,7 +15,7 @@ interface GeneratedNumber { rank: number; milhar: string; centena: string; dezen
 interface GenerationResponse { id: string; algorithm: string; algorithmVersion: number; bank: string; time: string; targetDate: string; windowDays: number; quantity: number; randomSeed: number; sampleExtractions: number; sampleResults: number; robustness: string; composition: any; numbers: GeneratedNumber[]; warning: string; betAmount: number; dezenaPayout: number; centenaPayout: number; milharPayout: number; usedRecommendedWindow: boolean; prizeRange: number; dezenaStake: number; centenaStake: number; milharStake: number; }
 interface BankDayGenerationResponse { sourcePrediction: GenerationResponse; predictions: GenerationResponse[]; totalBetAmount: number; message: string; }
 
-@Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule], templateUrl: './app.component.html' })
+@Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule, PagerComponent], templateUrl: './app.component.html' })
 export class AppComponent implements OnInit {
     private http = inject(HttpClient);
     api = location.hostname === 'localhost' ? 'http://localhost:8080/api' : 'https://lottery-lab.onrender.com/api';
@@ -60,7 +61,7 @@ export class AppComponent implements OnInit {
     historyEndDate = '';
     historyTime = '';
     historyPage = 1;
-    historyPageSize = 20;
+    historyPageSize = DEFAULT_PAGE_SIZE;
     historyTotal = 0;
     historyTotalPages = 1;
     milharSearchBank = 'LT NACIONAL';
@@ -91,6 +92,8 @@ export class AppComponent implements OnInit {
     ternoGeneration: any = null;
     ternoHistory: any[] = [];
     ternoPage = 1;
+    ternoPageSize = DEFAULT_PAGE_SIZE;
+    ternoTotal = 0;
     ternoTotalPages = 1;
     selectedTerno: any = null;
     generationWindowDays = 240;
@@ -125,15 +128,18 @@ export class AppComponent implements OnInit {
     loadingPrediction = false;
     loadingPredictions = false;
     predictionBank = 'LT NACIONAL';
-    predictionDate = '';
+    predictionDate = this.localDate();
     predictionTime = '';
     predictionStatusFilter = '';
     predictionPage = 1;
-    predictionPageSize = 20;
+    predictionPageSize = DEFAULT_PAGE_SIZE;
     predictionTotal = 0;
     predictionTotalPages = 1;
     selectedPredictionIds = new Set<string>();
     dashboard: any = null;
+    dashboardDatePager = new ClientPager();
+    candidatePager = new ClientPager();
+    milharOccurrencePager = new ClientPager();
     loadingDashboard = false;
     dashboardBank = 'LT NACIONAL';
     dashboardStartDate = '';
@@ -150,6 +156,7 @@ export class AppComponent implements OnInit {
     megaGeneration: any = null;
     megaPredictions: any[] = [];
     megaPredictionPage = 1;
+    megaPredictionPageSize = DEFAULT_PAGE_SIZE;
     megaPredictionTotalPages = 1;
     megaPredictionTotal = 0;
     loadingMegaPredictions = false;
@@ -158,6 +165,7 @@ export class AppComponent implements OnInit {
     deletingMega = false;
     megaDraws: any[] = [];
     megaDrawPage = 1;
+    megaDrawPageSize = DEFAULT_PAGE_SIZE;
     megaDrawTotalPages = 1;
     megaDrawTotal = 0;
     megaLatestContest: number | null = null;
@@ -198,6 +206,7 @@ export class AppComponent implements OnInit {
     lotoGeneration: any = null;
     lotoPredictions: any[] = [];
     lotoPredictionPage = 1;
+    lotoPredictionPageSize = DEFAULT_PAGE_SIZE;
     lotoPredictionTotalPages = 1;
     lotoPredictionTotal = 0;
     loadingLotoPredictions = false;
@@ -206,6 +215,7 @@ export class AppComponent implements OnInit {
     deletingLoto = false;
     lotoDraws: any[] = [];
     lotoDrawPage = 1;
+    lotoDrawPageSize = DEFAULT_PAGE_SIZE;
     lotoDrawTotalPages = 1;
     lotoDrawTotal = 0;
     lotoLatestContest: number | null = null;
@@ -424,7 +434,7 @@ export class AppComponent implements OnInit {
         this.milharSearchResult = null;
         const params = new URLSearchParams({ bank: this.milharSearchBank, milhar });
         this.http.get<any>(this.api + `/history/search-milhar?${params}`).subscribe({
-            next: response => { this.milharSearchValue = response.milhar; this.milharSearchResult = response; this.searchingMilhar = false; },
+            next: response => { this.milharSearchValue = response.milhar; this.milharSearchResult = response; this.milharOccurrencePager.page = 1; this.searchingMilhar = false; },
             error: error => { this.error = this.errorMessage(error); this.searchingMilhar = false; }
         });
     }
@@ -845,12 +855,13 @@ export class AppComponent implements OnInit {
     loadTernoHistory(page = 1) {
         if (!this.hasPermission('predictions.read')) return;
         this.loadingTernos = true;
-        const params = new URLSearchParams({ bank: this.ternoHistoryBank, page: String(page) });
+        const params = new URLSearchParams({ bank: this.ternoHistoryBank, page: String(page), pageSize: String(this.ternoPageSize) });
         this.http.get<any>(this.api + `/ternos?${params}`).subscribe({
             next: result => {
                 this.ternoHistory = result.items;
                 this.selectedTernoIds.clear();
                 this.ternoPage = result.page;
+                this.ternoTotal = result.total;
                 this.ternoTotalPages = result.totalPages;
                 this.loadingTernos = false;
                 if (this.selectedTerno) {
@@ -1165,7 +1176,7 @@ export class AppComponent implements OnInit {
         if (this.dashboardEndDate) params.set('endDate', this.dashboardEndDate);
         if (this.dashboardTime) params.set('time', this.dashboardTime);
         this.http.get<any>(this.api + `/predictions/statistics?${params}`).subscribe({
-            next: response => { this.dashboard = response; this.loadingDashboard = false; },
+            next: response => { this.dashboard = response; this.dashboardDatePager.page = 1; this.loadingDashboard = false; },
             error: error => { this.error = this.errorMessage(error); this.loadingDashboard = false; }
         });
     }
@@ -1186,7 +1197,7 @@ export class AppComponent implements OnInit {
         this.loadingPrediction = true;
         this.selectedPrediction = null;
         this.http.get<any>(this.api + `/predictions/${id}`).subscribe({
-            next: response => { response.candidates = this.sortByGroupAndMilhar(response.candidates); this.selectedPrediction = response; this.loadingPrediction = false; },
+            next: response => { response.candidates = this.sortByGroupAndMilhar(response.candidates); this.selectedPrediction = response; this.candidatePager.page = 1; this.loadingPrediction = false; },
             error: error => { this.error = this.errorMessage(error); this.loadingPrediction = false; }
         });
     }
@@ -1424,7 +1435,7 @@ export class AppComponent implements OnInit {
 
     loadMegaPredictions(page = 1) {
         this.loadingMegaPredictions = true;
-        this.http.get<any>(this.api + `/megasena/predictions?page=${Math.max(1, page)}&pageSize=20`).subscribe({
+        this.http.get<any>(this.api + `/megasena/predictions?page=${Math.max(1, page)}&pageSize=${this.megaPredictionPageSize}`).subscribe({
             next: response => {
                 this.megaPredictions = response.items; this.megaPredictionPage = response.page;
                 this.megaPredictionTotalPages = response.totalPages; this.megaPredictionTotal = response.total;
@@ -1467,7 +1478,7 @@ export class AppComponent implements OnInit {
 
     loadMegaDraws(page = 1) {
         this.loadingMegaDraws = true;
-        this.http.get<any>(this.api + `/megasena/draws?page=${Math.max(1, page)}&pageSize=20`).subscribe({
+        this.http.get<any>(this.api + `/megasena/draws?page=${Math.max(1, page)}&pageSize=${this.megaDrawPageSize}`).subscribe({
             next: response => {
                 this.megaDraws = response.items; this.megaDrawPage = response.page; this.megaDrawTotalPages = response.totalPages;
                 this.megaDrawTotal = response.total; this.megaLatestContest = response.latestContest; this.megaMissingDraws = response.missing;
@@ -1574,7 +1585,7 @@ export class AppComponent implements OnInit {
 
     loadLotoPredictions(page = 1) {
         this.loadingLotoPredictions = true;
-        this.http.get<any>(this.api + `/lotofacil/predictions?page=${Math.max(1, page)}&pageSize=20`).subscribe({
+        this.http.get<any>(this.api + `/lotofacil/predictions?page=${Math.max(1, page)}&pageSize=${this.lotoPredictionPageSize}`).subscribe({
             next: response => {
                 this.lotoPredictions = response.items; this.lotoPredictionPage = response.page;
                 this.lotoPredictionTotalPages = response.totalPages; this.lotoPredictionTotal = response.total;
@@ -1617,7 +1628,7 @@ export class AppComponent implements OnInit {
 
     loadLotoDraws(page = 1) {
         this.loadingLotoDraws = true;
-        this.http.get<any>(this.api + `/lotofacil/draws?page=${Math.max(1, page)}&pageSize=20`).subscribe({
+        this.http.get<any>(this.api + `/lotofacil/draws?page=${Math.max(1, page)}&pageSize=${this.lotoDrawPageSize}`).subscribe({
             next: response => {
                 this.lotoDraws = response.items; this.lotoDrawPage = response.page; this.lotoDrawTotalPages = response.totalPages;
                 this.lotoDrawTotal = response.total; this.lotoLatestContest = response.latestContest; this.lotoMissingDraws = response.missing;
