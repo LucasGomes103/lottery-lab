@@ -39,8 +39,10 @@ public static class LabBicho
         if (eligible.Count == 0) throw new ArgumentException("Não há extrações completas para a banca e o horário escolhidos.");
         var lastDate = extractions[eligible[^1]].Date.Date;
         var testStart = lastDate.AddDays(1 - options.TestDays);
-        var trainStart = testStart.AddDays(-options.TrainDays);
         var test = eligible.Where(i => extractions[i].Date >= testStart).TakeLast(MaxTestDraws).ToList();
+        // Com o limite de extrações, o treino encosta no início real do teste, sem deixar meses sem uso no meio.
+        if (test.Count > 0) testStart = extractions[test[0]].Date.Date;
+        var trainStart = testStart.AddDays(-options.TrainDays);
         var train = eligible.Where(i => extractions[i].Date >= trainStart && extractions[i].Date < testStart).ToList();
         if (test.Count < 10) throw new ArgumentException("O período de teste tem menos de 10 extrações completas. Aumente o período.");
 
