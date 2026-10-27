@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Dapper;
 using LotteryLab.Api.Data;
@@ -22,6 +23,7 @@ public sealed class MegaSenaResultsService(HttpClient http, Db db, MegaSenaSyncS
 {
     public const string CaixaUrl = "https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena";
     public const string FallbackUrl = "https://loteriascaixa-api.herokuapp.com/api/megasena";
+    public const string ResultadoFacilUrl = ResultadoFacilLotteryPage.BaseUrl + "mega-sena";
     private static readonly TimeSpan CaixaTimeout = TimeSpan.FromSeconds(20);
     private const int UpsertBatchSize = 500;
     // O serviço é criado por escopo (uma carga ou um ciclo do worker): após uma recusa da Caixa, o restante usa direto o fallback.
@@ -55,6 +57,22 @@ public sealed class MegaSenaResultsService(HttpClient http, Db db, MegaSenaSyncS
         return ParseFallback(document.RootElement);
     }
 
+    public static MegaSenaDraw ParseResultadoFacil(string html)
+    {
+        var page = ResultadoFacilLotteryPage.Parse(html, 6, [6, 5, 4]);
+        var prizes = page.Prizes;
+        return new MegaSenaDraw(page.Contest, page.DrawDate, page.Numbers, prizes[1].Winners, prizes[1].Prize, prizes[2].Winners, prizes[2].Prize,
+            prizes[3].Winners, prizes[3].Prize, prizes[1].Winners == 0, page.NextEstimate, ResultadoFacilUrl);
+    }
+
+    /// <summary>Dezenas válidas e rateio já publicado (a quadra sempre tem ganhadores depois da apuração).</summary>
+    public static bool IsComplete(MegaSenaDraw draw)
+    {
+        try { Validate(draw); }
+        catch (InvalidDataException) { return false; }
+        return draw.QuadraWinners > 0;
+    }
+
     /// <summary>Busca um concurso (ou o último, quando nulo) na Caixa e, se falhar, na fonte alternativa.</summary>
     public async Task<MegaSenaDraw> Fetch(int? contest, CancellationToken cancellationToken = default)
     {
@@ -74,6 +92,56 @@ public sealed class MegaSenaResultsService(HttpClient http, Db db, MegaSenaSyncS
             state.LastCaixaError = $"{DateTimeOffset.UtcNow:u} {Describe(error)}";
             logger.LogWarning(error, "Caixa indisponível para o concurso {Contest}; usando a fonte alternativa.", contest?.ToString() ?? "último");
             return ParseFallback(await GetString(FallbackUrl + (contest is null ? "/latest" : suffix), cancellationToken));
+        }
+    }
+
+    /// <summary>
+    /// O concurso mais recente disponível. O "último" da Caixa e da fonte alternativa costuma atrasar horas em relação à consulta
+    /// por número, então também tenta o concurso seguinte e, por fim, o Resultado Fácil (acessível do Render, ao contrário da Caixa).
+    /// </summary>
+    public async Task<MegaSenaDraw> FetchNewest(CancellationToken cancellationToken = default)
+    {
+        MegaSenaDraw? latest = null;
+        Exception? latestError = null;
+        try { latest = await Fetch(null, cancellationToken); }
+        catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            latestError = error;
+            logger.LogWarning(error, "Último concurso da Mega-Sena indisponível na Caixa e na fonte alternativa; tentando o Resultado Fácil.");
+        }
+        if (latest is not null && await TryFetchComplete(latest.Contest + 1, cancellationToken) is { } next) return next;
+        var scraped = await TryComplete(async () => ParseResultadoFacil(await GetString(ResultadoFacilUrl, cancellationToken, "text/html")),
+            cancellationToken, "Resultado Fácil");
+        if (scraped is not null && scraped.Contest > (latest?.Contest ?? 0)) return scraped;
+        if (latest is not null) return latest;
+        ExceptionDispatchInfo.Throw(latestError!);
+        return null!;
+    }
+
+    // Concurso ainda não sorteado faz a Caixa e a fonte alternativa responderem com erro: aqui isso é esperado e não marca a Caixa como indisponível.
+    private async Task<MegaSenaDraw?> TryFetchComplete(int contest, CancellationToken cancellationToken)
+    {
+        if (!caixaUnavailable)
+        {
+            using var caixaTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            caixaTimeout.CancelAfter(CaixaTimeout);
+            if (await TryComplete(async () => ParseCaixa(await GetString($"{CaixaUrl}/{contest}", caixaTimeout.Token)), cancellationToken, null) is { } caixa)
+                return caixa;
+        }
+        return await TryComplete(async () => ParseFallback(await GetString($"{FallbackUrl}/{contest}", cancellationToken)), cancellationToken, null);
+    }
+
+    private async Task<MegaSenaDraw?> TryComplete(Func<Task<MegaSenaDraw>> fetch, CancellationToken cancellationToken, string? warnSource)
+    {
+        try
+        {
+            var draw = await fetch();
+            return IsComplete(draw) ? draw : null;
+        }
+        catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            if (warnSource is not null) logger.LogWarning(error, "Falha ao consultar a Mega-Sena no {Source}.", warnSource);
+            return null;
         }
     }
 
@@ -139,7 +207,7 @@ public sealed class MegaSenaResultsService(HttpClient http, Db db, MegaSenaSyncS
         state.LastAttempt = DateTimeOffset.UtcNow;
         try
         {
-            var draw = await Fetch(null, cancellationToken);
+            var draw = await FetchNewest(cancellationToken);
             await Upsert(draw);
             state.LastSuccess = DateTimeOffset.UtcNow; state.LastContest = draw.Contest; state.LastSource = draw.Source; state.LastError = null;
             return draw;
@@ -220,10 +288,10 @@ public sealed class MegaSenaResultsService(HttpClient http, Db db, MegaSenaSyncS
         return new MegaSenaHistorySyncResult(latest.Contest, alreadyPresent, imported, errors);
     }
 
-    private async Task<string> GetString(string url, CancellationToken cancellationToken)
+    private async Task<string> GetString(string url, CancellationToken cancellationToken, string accept = "application/json")
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Accept.ParseAdd("application/json");
+        request.Headers.Accept.ParseAdd(accept);
         using var response = await http.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsStringAsync(cancellationToken);
