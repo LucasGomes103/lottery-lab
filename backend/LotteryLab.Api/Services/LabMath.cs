@@ -45,6 +45,25 @@ public static class LabMath
     }
 
     public static double Bonferroni(double p, int comparisons) => Math.Min(1, p * Math.Max(1, comparisons));
+
+    /// <summary>
+    /// Teste exato bilateral de "sorteios com prêmio": soma de Bernoullis com probabilidades diferentes por sorteio.
+    /// Prêmios raros e agrupados (um fechamento dá 2–3 quadras de uma vez) quebram a aproximação normal; contar sorteios não.
+    /// </summary>
+    public static double PoissonBinomialPValue(int observed, IReadOnlyList<double> probabilities)
+    {
+        var pmf = new double[probabilities.Count + 1];
+        pmf[0] = 1;
+        for (var i = 0; i < probabilities.Count; i++)
+        {
+            var q = Math.Clamp(probabilities[i], 0, 1);
+            for (var k = i + 1; k >= 1; k--) pmf[k] = pmf[k] * (1 - q) + pmf[k - 1] * q;
+            pmf[0] *= 1 - q;
+        }
+        double lower = 0, upper = 0;
+        for (var k = 0; k < pmf.Length; k++) { if (k <= observed) lower += pmf[k]; if (k >= observed) upper += pmf[k]; }
+        return Math.Clamp(2 * Math.Min(lower, upper), 0, 1);
+    }
 }
 
 /// <summary>
@@ -147,6 +166,44 @@ public sealed class LabLotteryOdds
         for (var s = 0; s <= Math.Min(a, b); s++)
             if (pairs[a, b, s] > 0) second += pairs[a, b, s] * PairMoment(a, b, s);
         return (mean, Math.Max(0, second - mean * mean));
+    }
+
+    /// <summary>
+    /// Chance de pelo menos uma aposta premiada (faixa principal) num sorteio uniforme. Exata quando as dezenas
+    /// usadas somam até <see cref="ExactUnionLimit"/> (jogo grande, fechamento); senão supõe jogos independentes.
+    /// </summary>
+    public double PrizeProbability(IReadOnlyList<ulong> games)
+    {
+        var union = games.Aggregate(0UL, (a, g) => a | g);
+        var u = System.Numerics.BitOperations.PopCount(union);
+        if (u > ExactUnionLimit)
+            return 1 - games.Aggregate(1d, (miss, g) => miss * (1 - SinglePrizeProbability(System.Numerics.BitOperations.PopCount(g))));
+        var bits = Enumerable.Range(0, 64).Where(i => (union & 1UL << i) != 0).ToArray();
+        // Fechamentos e jogos grandes repetem a mesma forma a cada concurso, só com outras dezenas: guarda pela forma.
+        var shape = string.Join(',', games.Select(g => Enumerable.Range(0, u).Where(i => (g & 1UL << bits[i]) != 0).Sum(i => 1L << i)).Order());
+        if (prizeProbabilities.TryGetValue(shape, out var cached)) return cached;
+        var probability = 0d;
+        // Só importa quais dezenas do conjunto saíram: cada subconjunto S com |S| = k tem chance C(U−u, K−k)/C(U,K).
+        for (var subset = 0; subset < 1 << u; subset++)
+        {
+            var k = System.Numerics.BitOperations.PopCount((uint)subset);
+            if (k > Drawn) continue;
+            var drawn = 0UL;
+            for (var i = 0; i < u; i++) if ((subset & 1 << i) != 0) drawn |= 1UL << bits[i];
+            if (games.Any(g => MainCount(System.Numerics.BitOperations.PopCount(g), System.Numerics.BitOperations.PopCount(g & drawn)) > 0))
+                probability += LabMath.Binomial(Universe - u, Drawn - k) / totalDraws;
+        }
+        return prizeProbabilities[shape] = probability;
+    }
+
+    public const int ExactUnionLimit = 12;
+    private readonly Dictionary<string, double> prizeProbabilities = [];
+
+    private double SinglePrizeProbability(int gameSize)
+    {
+        var sum = 0d;
+        for (var h = 0; h <= Math.Min(gameSize, Drawn); h++) if (MainCount(gameSize, h) > 0) sum += HitsProbability(gameSize, h);
+        return sum;
     }
 
     public static ulong Mask(IEnumerable<int> numbers) => numbers.Aggregate(0UL, (mask, n) => mask | 1UL << n);

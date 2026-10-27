@@ -83,7 +83,7 @@ public static class LabBicho
             {
                 var e = Evaluate(picks[i], extractions[test[i]], options);
                 tally.Add(e.Units, e.Cost, e.Return, e.ExpectedReturn, e.TierHits, e.TierExpected,
-                    e.TierHits[MainTier], e.TierExpected[MainTier], e.MainVariance, e.Prize);
+                    e.TierHits[MainTier], e.TierExpected[MainTier], e.MainVariance, e.Prize, e.PrizeProbability);
             }
         var tallies = rows.Select(x => x.Tally).ToList();
         var verdict = LabEngine.Finalize(tallies);
@@ -120,7 +120,7 @@ public static class LabBicho
     public static LabBichoKey KeyOf(LabExtraction extraction) => new(extraction.Date.Date, extraction.Time);
 
     public sealed record Evaluation(double Units, decimal Cost, decimal Return, double ExpectedReturn, double[] TierHits,
-        double[] TierExpected, double MainVariance, bool Prize);
+        double[] TierExpected, double MainVariance, bool Prize, double PrizeProbability);
 
     public static Evaluation Evaluate(IReadOnlyList<string> picks, LabExtraction target, LabBichoOptions options)
     {
@@ -139,7 +139,9 @@ public static class LabBicho
         decimal returned = 0; var expectedReturn = 0d;
         for (var t = 1; t < Tiers.Length; t++) { returned += (decimal)hits[t] * Payout(t, options); expectedReturn += expected[t] * (double)Payout(t, options); }
         return new Evaluation(values.Length * p, values.Length * 3 * options.BetValue, returned, expectedReturn, hits, expected,
-            p * (squares - mean * mean), hits[1] + hits[2] + hits[3] > 0);
+            p * (squares - mean * mean), hits[1] + hits[2] + hits[3] > 0,
+            // Centena e milhar terminam na dezena: há prêmio se alguma posição trouxer uma das dezenas apostadas.
+            1 - Math.Pow(1 - values.Select(x => x % 100).Distinct().Count() / 100d, p));
     }
 
     public static decimal Payout(int tier, LabBichoOptions options) => Math.Round(options.BetValue * Multipliers[tier] / options.PrizeRange, 2);

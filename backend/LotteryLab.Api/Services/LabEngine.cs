@@ -46,7 +46,9 @@ public static class LabEngine
         var comparisons = Math.Max(1, tested.Count);
         foreach (var row in rows)
         {
-            row.PTheory = LabMath.PValue(row.MainHits, row.MainExpected, row.MainVariance);
+            row.PTheory = row.UsesPrizeTest
+                ? LabMath.PoissonBinomialPValue(row.DrawsWithPrize, row.PrizeProbabilities)
+                : LabMath.PValue(row.MainHits, row.MainExpected, row.MainVariance);
             var baseline = rows.FirstOrDefault(x => x.IsBaseline && x.Group == row.Group);
             if (row.IsBaseline || baseline is null) continue;
             row.PTheoryAdjusted = LabMath.Bonferroni(row.PTheory.Value, comparisons);
@@ -55,8 +57,13 @@ public static class LabEngine
             row.PVsBaselineAdjusted = LabMath.Bonferroni(row.PVsBaseline.Value, comparisons);
             row.MainDiffVsBaseline = row.MainHits - baseline.MainHits;
             row.ReturnDiffVsBaseline = row.Return - baseline.Return;
-            var significant = row.PTheoryAdjusted < LabMath.Alpha || row.PVsBaselineAdjusted < LabMath.Alpha;
-            var above = row.PTheoryAdjusted < LabMath.Alpha ? row.MainHits > row.MainExpected : row.MainDiffVsBaseline > 0;
+            // Formato com dezenas sorteadas não tem como prever: só conta se diferir da referência nos mesmos sorteios.
+            var significant = row.FormatOnly
+                ? row.PVsBaselineAdjusted < LabMath.Alpha
+                : row.PTheoryAdjusted < LabMath.Alpha || row.PVsBaselineAdjusted < LabMath.Alpha;
+            var above = !row.FormatOnly && row.PTheoryAdjusted < LabMath.Alpha
+                ? (row.UsesPrizeTest ? row.DrawsWithPrize > row.ExpectedDrawsWithPrize : row.MainHits > row.MainExpected)
+                : row.MainDiffVsBaseline > 0;
             row.Significant = significant;
             row.Verdict = !significant ? NoEvidence : above ? "Diferença significativa (acima do acaso)" : "Diferença significativa (abaixo do acaso)";
         }
@@ -102,6 +109,13 @@ public sealed class LabTally(string group, string code, string name, string desc
     public double MainVariance { get; private set; }
     public List<double> MainPerDraw { get; } = [];
     public int DrawsWithPrize { get; private set; }
+    /// <summary>Chance exata (ou quase) de ter algum prêmio em cada sorteio, para o teste de sorteios premiados.</summary>
+    public List<double> PrizeProbabilities { get; } = [];
+    public double ExpectedDrawsWithPrize { get; private set; }
+    /// <summary>Linha que só muda o formato da aposta (dezenas sorteadas): o veredito depende da comparação pareada.</summary>
+    public bool FormatOnly { get; init; }
+    /// <summary>Faixa principal rara: o p contra o acaso usa sorteios premiados, não a aproximação normal.</summary>
+    public bool UsesPrizeTest => MainExpected < 10 && Draws > 0 && PrizeProbabilities.Count == Draws;
     public int HitsWithoutPrizeValue { get; set; }
     public double? PTheory { get; set; }
     public double? PTheoryAdjusted { get; set; }
@@ -113,13 +127,14 @@ public sealed class LabTally(string group, string code, string name, string desc
     public string? Verdict { get; set; }
 
     public void Add(double units, decimal cost, decimal returned, double expectedReturn, double[] tierHits, double[] tierExpected,
-        double mainHits, double mainExpected, double mainVariance, bool prize)
+        double mainHits, double mainExpected, double mainVariance, bool prize, double prizeProbability = double.NaN)
     {
         Draws++; Units += units; Cost += cost; Return += returned; ExpectedReturn += expectedReturn;
         for (var t = 0; t < TierHits.Length; t++) { TierHits[t] += tierHits[t]; TierExpected[t] += tierExpected[t]; }
         MainHits += mainHits; MainExpected += mainExpected; MainVariance += mainVariance;
         MainPerDraw.Add(mainHits);
         if (prize) DrawsWithPrize++;
+        if (!double.IsNaN(prizeProbability)) { PrizeProbabilities.Add(prizeProbability); ExpectedDrawsWithPrize += prizeProbability; }
     }
 
     public object ToResult(IReadOnlyList<LabTier> tiers) => new
@@ -139,6 +154,8 @@ public sealed class LabTally(string group, string code, string name, string desc
         expectedReturn = Math.Round(ExpectedReturn, 2),
         expectedReturnPerReal = Cost == 0 ? 0 : Math.Round(ExpectedReturn / (double)Cost, 4),
         drawsWithPrize = DrawsWithPrize, drawsWithPrizeRate = Draws == 0 ? 0 : Math.Round((double)DrawsWithPrize / Draws, 4),
+        expectedDrawsWithPrize = PrizeProbabilities.Count == Draws ? Math.Round(ExpectedDrawsWithPrize, 2) : (double?)null,
+        theoryTest = UsesPrizeTest ? "premiados" : "normal", formatOnly = FormatOnly,
         hitsWithoutPrizeValue = HitsWithoutPrizeValue,
         diffVsBaseline = MainDiffVsBaseline, returnDiffVsBaseline = ReturnDiffVsBaseline,
         pTheory = Round(PTheory), pTheoryAdjusted = Round(PTheoryAdjusted),

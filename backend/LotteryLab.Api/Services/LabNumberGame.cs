@@ -138,14 +138,16 @@ public static class LabNumberGame
                 "Jogos maiores contam como as apostas simples que contêm. A faixa principal soma as apostas premiadas " +
                 $"({spec.TierLabels[0].ToLowerInvariant()} ou melhor); média e variância do acaso são exatas (hipergeométrica, incluindo a sobreposição entre jogos). " +
                 "O retorno usa o rateio real de cada concurso; o esperado usa os mesmos rateios com as probabilidades exatas. " +
-                "O p-valor contra o aleatório é um teste pareado nos mesmos concursos. Todos com correção de Bonferroni."
+                "O p-valor contra o aleatório é um teste pareado nos mesmos concursos. Todos com correção de Bonferroni. " +
+                "Quando a faixa principal é rara (menos de 10 prêmios esperados), o p contra o acaso conta sorteios premiados com a chance exata de cada um, " +
+                "porque um fechamento ou jogo grande entrega várias quadras de uma vez. Nas linhas de estrutura as dezenas são sorteadas, então o veredito depende só da comparação com a referência."
         };
 
         int[][][] Play(List<int> targets, Func<IReadOnlyList<LabNumberDraw>, int, List<int[]>> strategy) =>
             LabEngine.WalkForward(draws, targets, d => d.Contest, (h, k) => strategy(h, k).ToArray(), Step);
 
         LabTally Tally(string group, string code, string name, string description, string? parameter = null, bool baseline = false) =>
-            new(group, code, name, description, spec.Tiers.Length, baseline) { Parameter = parameter };
+            new(group, code, name, description, spec.Tiers.Length, baseline) { Parameter = parameter, FormatOnly = group != "selecao" };
     }
 
     public static void Add(LabNumberGameSpec spec, LabTally tally, IReadOnlyList<int[]> games, LabNumberDraw draw)
@@ -175,7 +177,7 @@ public static class LabNumberGame
         }
         var (mean, variance) = odds.MainMoments(masks);
         var main = spec.Tiers.Select((tier, t) => tier >= odds.MainMinTier ? hits[t] : 0).Sum();
-        tally.Add(units, (decimal)units * spec.BetPrice, returned, expectedReturn, hits, expected, main, mean, variance, hits.Any(x => x > 0));
+        tally.Add(units, (decimal)units * spec.BetPrice, returned, expectedReturn, hits, expected, main, mean, variance, hits.Any(x => x > 0), odds.PrizeProbability(masks));
     }
 
     public static decimal Prize(LabNumberGameSpec spec, LabNumberDraw draw, int tierIndex) =>

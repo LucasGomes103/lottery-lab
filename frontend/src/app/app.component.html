@@ -352,9 +352,9 @@
               <td data-label="Acertos por faixa"><span *ngFor="let t of row.tiers" class="table-subtext">{{t.label}}: <strong>{{labCount(t.hits)}}</strong> ({{labCount(t.expected)}})</span></td>
               <td data-label="Taxa principal">{{labPercent(row.mainRate, 3)}}<span class="table-subtext">acaso: {{labPercent(row.mainTheoreticalRate, 3)}}</span><span *ngIf="row.smallSample" class="table-subtext warn">amostra pequena para esta faixa</span></td>
               <td data-label="Retorno por R$ 1">{{money(row.returnPerReal)}}<span class="table-subtext">acaso: {{money(row.expectedReturnPerReal)}}</span><span *ngIf="row.hitsWithoutPrizeValue" class="table-subtext warn">{{row.hitsWithoutPrizeValue}} prêmio(s) sem valor no rateio</span></td>
-              <td data-label="Sorteios com prêmio">{{row.drawsWithPrize}}<span class="table-subtext">{{labPercent(row.drawsWithPrizeRate, 1)}}</span></td>
+              <td data-label="Sorteios com prêmio">{{row.drawsWithPrize}}<span class="table-subtext">{{labPercent(row.drawsWithPrizeRate, 1)}}</span><span *ngIf="row.expectedDrawsWithPrize !== null" class="table-subtext">acaso: {{labCount(row.expectedDrawsWithPrize)}}</span></td>
               <td data-label="Dif. vs aleatório">{{row.isBaseline ? '—' : (row.diffVsBaseline > 0 ? '+' : '') + labCount(row.diffVsBaseline)}}<span *ngIf="!row.isBaseline" class="table-subtext">retorno {{money(row.returnDiffVsBaseline)}}</span></td>
-              <td data-label="p acaso (ajust.)">{{labPValue(row.isBaseline ? row.pTheory : row.pTheoryAdjusted)}}<span *ngIf="row.isBaseline" class="table-subtext">sem ajuste</span></td>
+              <td data-label="p acaso (ajust.)">{{labPValue(row.isBaseline ? row.pTheory : row.pTheoryAdjusted)}}<span *ngIf="row.isBaseline" class="table-subtext">sem ajuste</span><span *ngIf="row.theoryTest === 'premiados'" class="table-subtext">teste exato por sorteios premiados</span><span *ngIf="row.formatOnly && !row.isBaseline" class="table-subtext">formato: o veredito usa a comparação com a referência</span></td>
               <td data-label="p vs aleatório (ajust.)">{{labPValue(row.pVsBaselineAdjusted)}}</td>
               <td data-label="Veredito"><span class="strategy" [class.money-negative]="row.significant">{{row.verdict}}</span></td>
             </tr>

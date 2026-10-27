@@ -211,6 +211,55 @@ public class LabTests
     }
 
     [Fact]
+    public void PrizeProbabilityIsExactForBigGamesAndWheels()
+    {
+        var odds = new LabLotteryOdds(60, 6, 6, [4, 5, 6], 4);
+        var sevenGame = Enumerable.Range(4, 3).Sum(h => LabMath.Binomial(7, h) * LabMath.Binomial(53, 6 - h)) / 50_063_860d;
+        Assert.Equal(sevenGame, odds.PrizeProbability([LabLotteryOdds.Mask(Enumerable.Range(1, 7))]), 15);
+        // "Quadra se sair 4" com 7 dezenas premia exatamente quando 4 ou mais das 7 saem: a mesma chance do jogo de 7.
+        var wheel = new MegaSenaWheelService().Build(Enumerable.Range(1, 7), "4se4").Games.Select(LabLotteryOdds.Mask).ToList();
+        Assert.Equal(sevenGame, odds.PrizeProbability(wheel), 15);
+        // Fora do limite exato: jogos disjuntos são de fato independentes, então a aproximação é exata aqui.
+        var single = odds.PrizeProbability([LabLotteryOdds.Mask(Enumerable.Range(1, 6))]);
+        var disjoint = Enumerable.Range(0, 3).Select(i => LabLotteryOdds.Mask(Enumerable.Range(1 + 6 * i, 6))).ToList();
+        Assert.Equal(1 - Math.Pow(1 - single, 3), odds.PrizeProbability(disjoint), 12);
+    }
+
+    [Fact]
+    public void RarePrizesUseTheExactPrizeDrawTest()
+    {
+        var q = Enumerable.Repeat(0.001, 1000).ToList();
+        // Média de 1 sorteio premiado: 6 é raro (≈ 2 × 0,0006), 1 é o esperado.
+        Assert.InRange(LabMath.PoissonBinomialPValue(6, q), 0.0005, 0.002);
+        Assert.Equal(1, LabMath.PoissonBinomialPValue(1, q));
+        Assert.Equal(1, LabMath.PoissonBinomialPValue(5, Enumerable.Repeat(0.5, 10).ToList()));
+    }
+
+    [Fact]
+    public void FormatRowsNeedThePairedComparison()
+    {
+        // Fechamento com 15 quadras em 6 sorteios (esperado ≈ 2,1 em 1 sorteio): raro contra o acaso, mas igual à referência.
+        LabTally Row(bool baseline, int prizeDraws, double perPrize)
+        {
+            var tally = new LabTally("fechamento", baseline ? "simples" : "fechamento", "x", "", 1, baseline) { FormatOnly = true };
+            for (var i = 0; i < 1000; i++)
+            {
+                // A referência premia em outros sorteios, como no resultado real (p pareado ≈ 0,06).
+                var slot = baseline ? i - 75 : i;
+                var hits = slot >= 0 && slot % 150 == 0 && slot / 150 < prizeDraws ? perPrize : 0;
+                tally.Add(5, 30, 0, 0, [hits], [0.00214], hits, 0.00214, 0.0055, hits > 0, 0.001);
+            }
+            return tally;
+        }
+        var rows = new[] { Row(false, 6, 2.5), Row(true, 3, 1) };
+        var verdict = LabEngine.Finalize(rows);
+        Assert.True(rows[0].UsesPrizeTest);
+        Assert.True(rows[0].PTheory < 0.01);
+        Assert.False(rows[0].Significant);
+        Assert.Equal(LabEngine.NoEvidence, verdict.Title);
+    }
+
+    [Fact]
     public void DeleteSkipsRunsStillRunning()
     {
         var done = Guid.NewGuid(); var running = Guid.NewGuid();
