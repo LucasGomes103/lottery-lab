@@ -66,7 +66,7 @@ public static class LabBicho
                 "Mesma pontuação, seleção e semente da geração automática, com a janela recomendada do horário.", Tiers.Length),
                 Play(test, (h, k) => AppPicks(h, k, options))),
             (new LabTally(Group, "frequentes", "Mais frequentes",
-                "Dezenas mais sorteadas na janela; em cada uma, a centena e a milhar mais sorteadas.", Tiers.Length) { Parameter = $"janela de {bestWindow} dias (treino)" },
+                "Dezenas mais sorteadas na janela; em cada uma, a centena e a milhar mais sorteadas.", Tiers.Length) { Parameter = $"janela de {bestWindow} dias ({(train.Count == 0 ? "padrão, sem treino" : "treino")})" },
                 Play(test, (h, k) => MostFrequent(h, k, options.Quantity, bestWindow))),
             (new LabTally(Group, "atrasados", "Mais atrasados",
                 $"Dezenas há mais tempo sem sair (últimos {DelayLookbackDays} dias); em cada uma, a centena e a milhar mais atrasadas.", Tiers.Length),

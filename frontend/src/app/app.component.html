@@ -338,7 +338,8 @@
         <div class="section-head"><div><h3>Resultado · {{labGameName(r.game)}}<ng-container *ngIf="r.game === 'bicho'"> · {{r.bank}} · {{r.time === 'TODOS' ? 'todos os horários' : r.time}}</ng-container></h3>
           <p class="muted" *ngIf="r.game === 'bicho'">Teste: {{r.test.from | date:'dd/MM/yyyy'}} a {{r.test.to | date:'dd/MM/yyyy'}} · {{r.test.draws}} extrações<ng-container *ngIf="r.test.capped"> (limitado às últimas 400)</ng-container><ng-container *ngIf="r.training.draws"> · treino: {{r.training.from | date:'dd/MM/yyyy'}} a {{r.training.to | date:'dd/MM/yyyy'}} ({{r.training.draws}})</ng-container> · cotações por número: dezena {{money(r.parameters.payouts.dezena)}}, centena {{money(r.parameters.payouts.centena)}}, milhar {{money(r.parameters.payouts.milhar)}}</p>
           <p class="muted" *ngIf="r.game !== 'bicho'">Teste: concursos {{r.test.from}} a {{r.test.to}} ({{r.test.fromDate | date:'dd/MM/yyyy'}} a {{r.test.toDate | date:'dd/MM/yyyy'}}) · {{r.test.draws}} concursos<ng-container *ngIf="r.training.draws"> · treino: {{r.training.from}} a {{r.training.to}}</ng-container></p>
-          <p class="muted" *ngFor="let c of r.training.choices">Treino escolheu {{c.strategy}}: {{c.chosen}} ({{c.parameter}}, pelo critério {{c.metric}}).</p>
+          <p class="warn" *ngIf="!r.training.draws">Sem extrações/concursos antes do teste para treinar: foram usadas as janelas padrão. Diminua o período de teste para sobrar histórico para o treino.</p>
+          <p class="muted" *ngFor="let c of (r.training.draws ? r.training.choices : [])">Treino escolheu {{c.strategy}}: {{c.chosen}} ({{c.parameter}}, pelo critério {{c.metric}}).</p>
         </div><span class="muted lab-elapsed">{{(labJob.result.elapsedMs / 1000) | number:'1.0-1'}} s</span></div>
         <ng-container *ngFor="let g of r.groups">
           <h4 class="lab-group-title">{{g.title}}</h4>

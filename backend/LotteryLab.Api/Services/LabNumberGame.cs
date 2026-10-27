@@ -87,9 +87,9 @@ public static class LabNumberGame
         {
             (Tally("selecao", "app", "Gerador do app", $"{n} jogos do gerador da tela {spec.Name} (score com janela de {AppWindowContests} concursos, semente = concurso)."),
                 Play(test, (h, k) => spec.AppGames(h.Select(x => x.Numbers).ToList(), n, k))),
-            (Tally("selecao", "quentes", "Dezenas quentes", $"Jogo 1 com as {b} mais sorteadas na janela; os demais sorteados entre as {spec.HotPool} mais sorteadas.", $"janela de {hotWindow} concursos (treino)"),
+            (Tally("selecao", "quentes", "Dezenas quentes", $"Jogo 1 com as {b} mais sorteadas na janela; os demais sorteados entre as {spec.HotPool} mais sorteadas.", $"janela de {hotWindow} concursos ({(train.Count == 0 ? "padrão, sem treino" : "treino")})"),
                 Play(test, (h, k) => PoolGames(spec, h, k, n, hotWindow, true))),
-            (Tally("selecao", "frias", "Dezenas frias", $"Jogo 1 com as {b} menos sorteadas na janela; os demais sorteados entre as {spec.HotPool} menos sorteadas.", $"janela de {coldWindow} concursos (treino)"),
+            (Tally("selecao", "frias", "Dezenas frias", $"Jogo 1 com as {b} menos sorteadas na janela; os demais sorteados entre as {spec.HotPool} menos sorteadas.", $"janela de {coldWindow} concursos ({(train.Count == 0 ? "padrão, sem treino" : "treino")})"),
                 Play(test, (h, k) => PoolGames(spec, h, k, n, coldWindow, false))),
             (Tally("selecao", "aleatorio", "Aleatório", $"{n} jogos simples sorteados com semente fixa.", baseline: true),
                 Play(test, (_, k) => RandomGames(spec, k, "selecao", n, b))),
