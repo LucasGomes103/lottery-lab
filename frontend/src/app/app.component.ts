@@ -902,6 +902,34 @@ export class AppComponent implements OnInit {
         });
     }
 
+    selectedLabRunIds = new Set<string>();
+    deletingLabRuns = false;
+
+    toggleLabRunSelection(id: string, checked: boolean) {
+        if (checked) this.selectedLabRunIds.add(id); else this.selectedLabRunIds.delete(id);
+        this.selectedLabRunIds = new Set(this.selectedLabRunIds);
+    }
+
+    toggleAllLabRuns(checked: boolean) {
+        this.selectedLabRunIds = new Set(checked ? this.labRunsPager.slice(this.labRuns).map(run => run.id) : []);
+    }
+
+    deleteSelectedLabRuns() { this.deleteLabRuns([...this.selectedLabRunIds]); }
+
+    deleteLabRuns(ids: string[]) {
+        if (!ids.length || this.deletingLabRuns) return;
+        if (!window.confirm(ids.length === 1 ? 'Excluir esta execução do laboratório?' : `Excluir ${ids.length} execuções do laboratório?`)) return;
+        this.deletingLabRuns = true;
+        this.http.post<any>(this.api + '/lab/runs/delete-batch', { ids }).subscribe({
+            next: response => {
+                this.message = response.message; this.deletingLabRuns = false;
+                if (this.labJob && !this.labRunning && ids.includes(this.labJob.id)) this.labJob = null;
+                this.selectedLabRunIds = new Set<string>(); this.loadLabRuns();
+            },
+            error: error => { this.error = this.errorMessage(error); this.deletingLabRuns = false; }
+        });
+    }
+
     labGameName(game: string) { return game === 'megasena' ? 'Mega-Sena' : game === 'lotofacil' ? 'Lotofácil' : 'Bicho'; }
 
     labRunLabel(run: any) {

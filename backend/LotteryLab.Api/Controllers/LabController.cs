@@ -25,4 +25,15 @@ public sealed class LabController(LabJobService lab) : ControllerBase
 
     [HttpGet("runs")]
     public async Task<IActionResult> List(int limit = 20) => Ok(await lab.List(limit));
+
+    [HttpDelete("runs/{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id) => Ok(await lab.Delete([id]));
+
+    [HttpPost("runs/delete-batch")]
+    public async Task<IActionResult> DeleteBatch(PredictionDeleteRequest request)
+    {
+        if (request.Ids is not { Count: > 0 }) return BadRequest(new { message = "Selecione ao menos uma execução." });
+        if (request.Ids.Count > 500) return BadRequest(new { message = "Exclua no máximo 500 execuções por vez." });
+        return Ok(await lab.Delete(request.Ids));
+    }
 }

@@ -234,6 +234,27 @@ public sealed class LabJobService(Db db, ILogger<LabJobService> logger)
         });
     }
 
+    /// <summary>Exclui execuções salvas. As que ainda estão na fila ou rodando ficam de fora.</summary>
+    public async Task<object> Delete(IReadOnlyCollection<Guid> ids)
+    {
+        var active = jobs.Values.Where(x => x.Status is "QUEUED" or "RUNNING").Select(x => x.Id).ToHashSet();
+        var deletable = DeletableIds(ids, active);
+        var deleted = 0;
+        if (deletable.Length > 0)
+        {
+            await using var connection = db.Open();
+            deleted = await connection.ExecuteAsync("delete from lab_runs where id=any(@ids)", new { ids = deletable });
+        }
+        foreach (var id in deletable) jobs.TryRemove(id, out _);
+        var skipped = ids.Distinct().Count() - deletable.Length;
+        return new { deleted, skipped, message = skipped > 0
+            ? $"{deleted} execução(ões) excluída(s). {skipped} ainda em andamento não foi(ram) excluída(s)."
+            : $"{deleted} execução(ões) excluída(s)." };
+    }
+
+    public static Guid[] DeletableIds(IEnumerable<Guid> ids, IReadOnlySet<Guid> active) =>
+        ids.Distinct().Where(id => !active.Contains(id)).ToArray();
+
     private static object Snapshot(Job job) => new
     {
         id = job.Id, game = job.Game, status = job.Status, stage = job.Stage, completed = job.Completed, total = job.Total,

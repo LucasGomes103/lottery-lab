@@ -210,6 +210,13 @@ public class LabTests
         return tally;
     }
 
+    [Fact]
+    public void DeleteSkipsRunsStillRunning()
+    {
+        var done = Guid.NewGuid(); var running = Guid.NewGuid();
+        Assert.Equal([done], LabJobService.DeletableIds([done, running, done], new HashSet<Guid> { running }));
+    }
+
     // ---------- Execução completa ----------
 
     [Fact]
