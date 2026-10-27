@@ -6,4 +6,7 @@
 	<PackageReference Include="PdfPig" Version="0.1.16-alpha-202608201713-f131e" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="LotteryLab.Api.Tests" />
+  </ItemGroup>
 </Project>

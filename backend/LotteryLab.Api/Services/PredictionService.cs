@@ -852,6 +852,24 @@ public sealed partial class PredictionService(Db db)
 
     public const int MaxBatteryEvaluations = 3000;
 
+    // Laboratório: a mesma pontuação, seleção e semente da geração com janela recomendada. Fica de fora só o
+    // histórico de previsões salvas (penalidade de repetição), que não existia nas datas passadas.
+    // O chamador entrega apenas resultados anteriores ao alvo; o corte por data/horário é refeito aqui por segurança.
+    internal static List<string> LabMilhares(IEnumerable<(long ExtractionId, DateTime Date, TimeSpan Time, int Position, string Number)> priorRows,
+        string bank, DateOnly date, TimeOnly targetTime, int quantity)
+    {
+        var windowDays = RecommendedWindow(targetTime);
+        var target = date.ToDateTime(targetTime);
+        var start = target.AddDays(-windowDays).Date;
+        var rows = priorRows.Where(x => x.Date >= start && x.Date.Add(x.Time) < target)
+            .Select(x => new Row(x.ExtractionId, x.Date, x.Time, x.Position, x.Number)).ToList();
+        var seed = StableSeed($"{Algorithm}:{Version}:{bank}:{date:yyyy-MM-dd}:{targetTime:HH:mm}:{windowDays}:{quantity}:ALL");
+        return Select(Score(rows, targetTime, [], explain: false), quantity, seed, false).Select(x => x.Milhar).ToList();
+    }
+
+    internal static int LabWindowDays(TimeOnly targetTime) => RecommendedWindow(targetTime);
+    internal static long LabSeed(string value) => StableSeed(value);
+
     private static List<Scored> Score(List<Row> rows, TimeOnly targetTime, Dictionary<string, int> priorAppearances, bool v3 = true,
         bool explain = true)
     {

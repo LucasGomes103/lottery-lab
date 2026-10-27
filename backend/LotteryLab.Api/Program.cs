@@ -82,6 +82,8 @@ builder.Services.AddHttpClient<LotofacilResultsService>(client =>
     client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36");
     client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("pt-BR,pt;q=0.9,en;q=0.8");
 });
+builder.Services.AddSingleton<LabSchema>();
+builder.Services.AddSingleton<LabJobService>();
 builder.Services.AddHostedService<ExternalResultsWorker>();
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ??
     ["https://lottery-lab.gomeslucas103.workers.dev", "http://localhost:4200"];
@@ -92,6 +94,7 @@ await app.Services.GetRequiredService<PredictionSchema>().Initialize();
 await app.Services.GetRequiredService<AuthSchema>().Initialize();
 await app.Services.GetRequiredService<MegaSenaSchema>().Initialize();
 await app.Services.GetRequiredService<LotofacilSchema>().Initialize();
+await app.Services.GetRequiredService<LabSchema>().Initialize();
 // A reavaliação roda em segundo plano para a API responder logo após o deploy ou o cold start.
 app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
 {
