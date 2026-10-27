@@ -17,6 +17,7 @@
 <button *ngIf="hasPermission('predictions.read')" [class.active]="activeSection === 'predictions'" (click)="navigate('predictions')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.4 5.6L20 9.2l-4.3 3.9 1.2 5.9L12 16l-4.9 3 1.2-5.9L4 9.2l5.6-.6z"/></svg>Previsões</button>
 <button *ngIf="hasPermission('predictions.read')" [class.active]="activeSection === 'megasena'" (click)="navigate('megasena')"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="3.5"/><circle cx="16" cy="8" r="3.5"/><circle cx="8" cy="16" r="3.5"/><circle cx="16" cy="16" r="3.5"/></svg>Mega-Sena</button>
 <button *ngIf="hasPermission('predictions.read')" [class.active]="activeSection === 'lotofacil'" (click)="navigate('lotofacil')"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9.3 4v16M14.7 4v16M4 9.3h16M4 14.7h16"/></svg>Lotofácil</button>
+<button *ngIf="hasPermission('analysis.use')" [class.active]="activeSection === 'lab'" (click)="navigate('lab')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5.2 9.1A2 2 0 006.5 21h11a2 2 0 001.7-2.9L14 9V3M7.5 15h9"/></svg>Laboratório</button>
 <button *ngIf="hasPermission('dashboard.read')" [class.active]="activeSection === 'dashboard'" (click)="navigate('dashboard')"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="4" rx="1.5"/><rect x="13" y="10" width="7" height="10" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/></svg>Dashboard</button>
 <button *ngIf="hasPermission('users.manage')" [class.active]="activeSection === 'users'" (click)="navigate('users')"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.5 3.5 0 010 7M18 14c1.8.8 3 2.7 3 6"/></svg>Usuários</button>
 </nav>
@@ -294,6 +295,80 @@
         <app-pager *ngIf="lotoDrawTotal" [page]="lotoDrawPage" [totalPages]="lotoDrawTotalPages" [total]="lotoDrawTotal" [pageSize]="lotoDrawPageSize" [disabled]="loadingLotoDraws" (pageChange)="loadLotoDraws($event)" (pageSizeChange)="lotoDrawPageSize = $event; loadLotoDraws(1)"></app-pager>
       </div>
     </ng-container>
+  </section>
+  <section *ngIf="activeSection === 'lab'">
+    <div class="section-head"><div><h2>Laboratório</h2><p class="muted">Teste estratégias no passado sem olhar o futuro: cada sorteio é previsto só com os anteriores e conferido em seguida, sempre contra um apostador aleatório com o mesmo custo.</p></div></div>
+    <p class="notice mega-warning lab-explain"><strong>Antes de ler os números:</strong> os sorteios são aleatórios e independentes, então nenhum histórico muda a chance do próximo resultado. O que você controla de verdade é o <strong>custo</strong> (quanto aposta), a <strong>cobertura</strong> (quantos números diferentes cobre) e a <strong>garantia</strong> (fechamentos trocam chance de prêmio grande por prêmio menor mais frequente) — não a previsão. Uma diferença só conta se resistir ao teste estatístico com correção para várias comparações.</p>
+    <div class="mega-tabs" role="tablist"><button role="tab" [class.active]="labTab === 'bicho'" (click)="openLabTab('bicho')">Bicho</button><button role="tab" [class.active]="labTab === 'megasena'" (click)="openLabTab('megasena')">Mega-Sena</button><button role="tab" [class.active]="labTab === 'lotofacil'" (click)="openLabTab('lotofacil')">Lotofácil</button></div>
+
+    <div class="card generator-card">
+      <ng-container *ngIf="labTab === 'bicho'">
+        <h3>Bicho · Nacional e Look</h3>
+        <p class="muted">Estratégias: previsão do app, mais frequentes (janela escolhida no treino), mais atrasados, repetir a última extração e aleatório. Todas jogam a mesma quantidade de milhares, com o mesmo valor em dezena, centena e milhar.</p>
+        <div class="filters">
+          <label>Banca <select [(ngModel)]="labBank" (ngModelChange)="labBankChanged()"><option value="LT NACIONAL">Loteria Nacional</option><option value="LOOK LOTERIAS">Look Loterias</option></select></label>
+          <label>Horário <select [(ngModel)]="labTime"><option *ngFor="let t of schedulesFor(labBank)" [value]="t">{{t}}</option><option value="TODOS">Todos (até 400 extrações)</option></select></label>
+          <label>Teste (últimos dias) <input type="number" min="7" max="365" [(ngModel)]="labTestDays"></label>
+          <label>Treino (dias antes) <input type="number" min="0" max="365" [(ngModel)]="labTrainDays"></label>
+          <label>Milhares por extração <input type="number" min="1" max="100" [(ngModel)]="labQuantity"></label>
+          <label>Valor por número e modalidade <input type="number" min="0.01" step="0.5" [(ngModel)]="labBetValue"></label>
+          <label>Faixa de prêmio <select [(ngModel)]="labPrizeRange"><option *ngFor="let p of [1,5,10]" [ngValue]="p">1º ao {{p}}º</option></select></label>
+        </div>
+        <p class="selection-note">Custo por extração: {{money(labQuantity * 3 * labBetValue)}} ({{labQuantity}} milhares × dezena, centena e milhar).</p>
+      </ng-container>
+      <ng-container *ngIf="labTab !== 'bicho'">
+        <h3>{{labGameName(labTab)}}</h3>
+        <p class="muted" *ngIf="labTab === 'megasena'">Seleção (gerador do app, quentes, frias, aleatório) com o mesmo número de apostas simples, e estruturas com o mesmo orçamento: 1 jogo de 7 ou 8 dezenas e o fechamento de quadra garantida contra jogos simples soltos.</p>
+        <p class="muted" *ngIf="labTab === 'lotofacil'">Seleção (gerador do app, quentes, frias, aleatório) com o mesmo número de apostas simples, e estruturas com o mesmo orçamento: 1 jogo de 16, 17 ou 18 dezenas contra jogos simples de 15.</p>
+        <div class="filters">
+          <label>Teste (últimos concursos) <input type="number" min="20" max="1000" [(ngModel)]="labTestContests"></label>
+          <label>Treino (concursos antes) <input type="number" min="0" max="1000" [(ngModel)]="labTrainContests"></label>
+          <label>Jogos simples por concurso <input type="number" min="1" max="50" [(ngModel)]="labQuantity"></label>
+          <label *ngIf="labTab === 'megasena'">Dezenas do fechamento <select [(ngModel)]="labWheelNumbers"><option *ngFor="let n of [7,8,9,10,11,12]" [ngValue]="n">{{n}} dezenas</option></select></label>
+        </div>
+        <p class="selection-note">Seleção: {{money(labQuantity * (labTab === 'megasena' ? 6 : 3.5))}} por concurso ({{labQuantity}} apostas de {{labTab === 'megasena' ? '6' : '15'}} dezenas).</p>
+      </ng-container>
+      <button (click)="runLab()" [disabled]="labRunning">{{labRunning ? 'Rodando...' : 'Rodar laboratório'}}</button>
+      <div *ngIf="labRunning && labJob" class="battery-progress"><div><strong>{{labJob.percent || 0}}%</strong><span>{{labJob.stage}}<ng-container *ngIf="labJob.total"> · {{labJob.completed}} de {{labJob.total}} passos</ng-container></span></div><div class="progress-track"><span [style.width.%]="labJob.percent || 0"></span></div><p class="muted">Pode levar até 2 minutos no servidor gratuito. Você pode sair desta tela: o resultado fica salvo em "Execuções anteriores".</p></div>
+    </div>
+
+    <ng-container *ngIf="labReport as r">
+      <div class="verdict" [class.idle]="!r.verdict.significant" [class.warning]="r.verdict.significant"><strong>{{r.verdict.title}}</strong><p>{{r.verdict.detail}}</p></div>
+      <div class="card">
+        <div class="section-head"><div><h3>Resultado · {{labGameName(r.game)}}<ng-container *ngIf="r.game === 'bicho'"> · {{r.bank}} · {{r.time === 'TODOS' ? 'todos os horários' : r.time}}</ng-container></h3>
+          <p class="muted" *ngIf="r.game === 'bicho'">Teste: {{r.test.from | date:'dd/MM/yyyy'}} a {{r.test.to | date:'dd/MM/yyyy'}} · {{r.test.draws}} extrações<ng-container *ngIf="r.test.capped"> (limitado às últimas 400)</ng-container><ng-container *ngIf="r.training.draws"> · treino: {{r.training.from | date:'dd/MM/yyyy'}} a {{r.training.to | date:'dd/MM/yyyy'}} ({{r.training.draws}})</ng-container> · cotações por número: dezena {{money(r.parameters.payouts.dezena)}}, centena {{money(r.parameters.payouts.centena)}}, milhar {{money(r.parameters.payouts.milhar)}}</p>
+          <p class="muted" *ngIf="r.game !== 'bicho'">Teste: concursos {{r.test.from}} a {{r.test.to}} ({{r.test.fromDate | date:'dd/MM/yyyy'}} a {{r.test.toDate | date:'dd/MM/yyyy'}}) · {{r.test.draws}} concursos<ng-container *ngIf="r.training.draws"> · treino: {{r.training.from}} a {{r.training.to}}</ng-container></p>
+          <p class="muted" *ngFor="let c of r.training.choices">Treino escolheu {{c.strategy}}: {{c.chosen}} ({{c.parameter}}, pelo critério {{c.metric}}).</p>
+        </div><span class="muted lab-elapsed">{{(labJob.result.elapsedMs / 1000) | number:'1.0-1'}} s</span></div>
+        <ng-container *ngFor="let g of r.groups">
+          <h4 class="lab-group-title">{{g.title}}</h4>
+          <p class="muted">{{g.description}}</p>
+          <div class="table-wrap stack"><table><thead><tr><th>Estratégia</th><th>Sorteios</th><th>Custo</th><th>Acertos por faixa (esperado)</th><th>Taxa da faixa principal</th><th>Retorno por R$ 1</th><th>Sorteios com prêmio</th><th>Dif. vs aleatório</th><th>p acaso (ajust.)</th><th>p vs aleatório (ajust.)</th><th>Veredito</th></tr></thead><tbody>
+            <tr *ngFor="let row of labRows(g.code)" [class.lab-baseline]="row.isBaseline">
+              <td data-label="Estratégia"><strong>{{row.name}}</strong> <span *ngIf="row.isBaseline" class="badge pending">referência</span><span *ngIf="row.parameter" class="table-subtext">{{row.parameter}}</span><span class="table-subtext">{{row.description}}</span></td>
+              <td data-label="Sorteios">{{row.draws}}</td>
+              <td data-label="Custo">{{money(row.totalCost)}}<span class="table-subtext">{{money(row.costPerDraw)}} por sorteio</span></td>
+              <td data-label="Acertos por faixa"><span *ngFor="let t of row.tiers" class="table-subtext">{{t.label}}: <strong>{{labCount(t.hits)}}</strong> ({{labCount(t.expected)}})</span></td>
+              <td data-label="Taxa principal">{{labPercent(row.mainRate, 3)}}<span class="table-subtext">acaso: {{labPercent(row.mainTheoreticalRate, 3)}}</span><span *ngIf="row.smallSample" class="table-subtext warn">amostra pequena para esta faixa</span></td>
+              <td data-label="Retorno por R$ 1">{{money(row.returnPerReal)}}<span class="table-subtext">acaso: {{money(row.expectedReturnPerReal)}}</span><span *ngIf="row.hitsWithoutPrizeValue" class="table-subtext warn">{{row.hitsWithoutPrizeValue}} prêmio(s) sem valor no rateio</span></td>
+              <td data-label="Sorteios com prêmio">{{row.drawsWithPrize}}<span class="table-subtext">{{labPercent(row.drawsWithPrizeRate, 1)}}</span></td>
+              <td data-label="Dif. vs aleatório">{{row.isBaseline ? '—' : (row.diffVsBaseline > 0 ? '+' : '') + labCount(row.diffVsBaseline)}}<span *ngIf="!row.isBaseline" class="table-subtext">retorno {{money(row.returnDiffVsBaseline)}}</span></td>
+              <td data-label="p acaso (ajust.)">{{labPValue(row.isBaseline ? row.pTheory : row.pTheoryAdjusted)}}<span *ngIf="row.isBaseline" class="table-subtext">sem ajuste</span></td>
+              <td data-label="p vs aleatório (ajust.)">{{labPValue(row.pVsBaselineAdjusted)}}</td>
+              <td data-label="Veredito"><span class="strategy" [class.money-negative]="row.significant">{{row.verdict}}</span></td>
+            </tr>
+          </tbody></table></div>
+        </ng-container>
+        <details class="mega-scores"><summary>Como ler</summary><p class="muted">{{r.methodology}}</p><p class="muted">p acaso: chance de um resultado tão distante do esperado se a estratégia fosse puro sorteio. p vs aleatório: compara com a linha de referência nos mesmos sorteios. "Ajust." multiplica pelo número de comparações (Bonferroni); abaixo de 0,050 é significativo.</p><p class="muted">{{labJob.result.explanation}}</p></details>
+      </div>
+    </ng-container>
+
+    <div class="card">
+      <div class="section-head"><div><h3>Execuções anteriores</h3><p class="muted">As últimas 20 execuções salvas.</p></div><button class="secondary" (click)="loadLabRuns()" [disabled]="loadingLabRuns">Atualizar</button></div>
+      <p *ngIf="!loadingLabRuns && !labRuns.length" class="muted">Nenhuma execução ainda.</p>
+      <div class="table-wrap stack" *ngIf="labRuns.length"><table><thead><tr><th>Quando</th><th>Jogo</th><th>Parâmetros</th><th>Situação</th><th>Veredito</th><th></th></tr></thead><tbody><tr *ngFor="let run of labRunsPager.slice(labRuns)"><td data-label="Quando">{{run.createdAt | date:'dd/MM/yyyy HH:mm'}}</td><td data-label="Jogo">{{labGameName(run.game)}}</td><td data-label="Parâmetros">{{labRunLabel(run)}}</td><td data-label="Situação"><span class="strategy">{{run.status === 'COMPLETED' ? 'Concluída' : run.status === 'FAILED' ? 'Falhou' : 'Em andamento'}}</span></td><td data-label="Veredito">{{run.verdict || '—'}}</td><td><button class="secondary small" (click)="openLabRun(run)" [disabled]="labRunning || run.status !== 'COMPLETED'">Abrir</button></td></tr></tbody></table></div>
+      <app-pager *ngIf="labRuns.length" [page]="labRunsPager.page" [totalPages]="labRunsPager.totalPages(labRuns)" [total]="labRuns.length" [pageSize]="labRunsPager.pageSize" (pageChange)="labRunsPager.page = $event" (pageSizeChange)="labRunsPager.setPageSize($event)"></app-pager>
+    </div>
   </section>
   <section *ngIf="activeSection === 'analysis'" class="analysis">
     <div class="section-head"><div><h2>Análises</h2><p class="muted">Gere jogos, veja o resultado e confira se o modelo funciona.</p></div></div>

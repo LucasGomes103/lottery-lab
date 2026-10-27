@@ -55,7 +55,7 @@ export class AppComponent implements OnInit {
     editingIds: number[] = [];
     selectedHistoryIds = new Set<number>();
     history: HistoryItem[] = [];
-    activeSection: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'megasena' | 'lotofacil' | 'dashboard' | 'users' | 'account' = 'import';
+    activeSection: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'megasena' | 'lotofacil' | 'lab' | 'dashboard' | 'users' | 'account' = 'import';
     historyBank = 'LT NACIONAL';
     historyStartDate = '';
     historyEndDate = '';
@@ -305,7 +305,7 @@ export class AppComponent implements OnInit {
     openMenu() { this.menuOpen = true; document.body.classList.add('menu-open'); }
     @HostListener('document:keydown.escape') closeMenu() { this.menuOpen = false; document.body.classList.remove('menu-open'); }
 
-    navigate(section: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'megasena' | 'lotofacil' | 'dashboard' | 'users' | 'account') {
+    navigate(section: 'import' | 'history' | 'milhar-search' | 'analysis' | 'predictions' | 'megasena' | 'lotofacil' | 'lab' | 'dashboard' | 'users' | 'account') {
         this.activeSection = section;
         this.closeMenu();
         this.error = '';
@@ -317,6 +317,7 @@ export class AppComponent implements OnInit {
         if (section === 'lotofacil') this.openLotoTab(this.lotoTab);
         if (section === 'users') this.loadUsers();
         if (section === 'analysis') this.openAnalysis();
+        if (section === 'lab') this.loadLabRuns();
     }
 
     // Estado visual da tela de Análises: abas, filtros compartilhados e painéis recolhíveis.
@@ -813,6 +814,116 @@ export class AppComponent implements OnInit {
             next: result => { this.randomness = result; this.loadingRandomness = false; },
             error: error => { this.error = this.errorMessage(error); this.loadingRandomness = false; }
         });
+    }
+
+    // Laboratório: backtest walk-forward das estratégias contra o aleatório, executado em segundo plano na API.
+    labTab: 'bicho' | 'megasena' | 'lotofacil' = 'bicho';
+    labBank = 'LT NACIONAL';
+    labTime = '21:00';
+    labTestDays = 180;
+    labTrainDays = 180;
+    labTestContests = 300;
+    labTrainContests = 300;
+    labQuantity = 10;
+    labBetValue = 1;
+    labPrizeRange = 5;
+    labWheelNumbers = 10;
+    labJob: any = null;
+    labRunning = false;
+    labRuns: any[] = [];
+    loadingLabRuns = false;
+    labRunsPager = new ClientPager();
+    private labPoll: ReturnType<typeof setInterval> | null = null;
+    private readonly labDefaultQuantity = { bicho: 10, megasena: 7, lotofacil: 16 };
+
+    get labReport() { return this.labJob?.status === 'COMPLETED' ? this.labJob.result?.report ?? null : null; }
+
+    openLabTab(tab: 'bicho' | 'megasena' | 'lotofacil') {
+        if (this.labTab === tab) return;
+        this.labTab = tab;
+        this.labQuantity = this.labDefaultQuantity[tab];
+        if (!this.labRunning) this.labJob = null;
+    }
+
+    labBankChanged() {
+        if (this.labTime !== 'TODOS' && !this.schedulesFor(this.labBank).includes(this.labTime)) this.labTime = '21:00';
+    }
+
+    runLab() {
+        this.error = '';
+        this.labRunning = true;
+        this.labJob = null;
+        const body = this.labTab === 'bicho'
+            ? { game: 'bicho', bank: this.labBank, time: this.labTime, testDays: this.labTestDays, trainDays: this.labTrainDays,
+                quantity: this.labQuantity, betValue: this.labBetValue, prizeRange: this.labPrizeRange }
+            : { game: this.labTab, testContests: this.labTestContests, trainContests: this.labTrainContests, quantity: this.labQuantity,
+                wheelNumbers: this.labWheelNumbers };
+        this.http.post<any>(this.api + '/lab/run', body).subscribe({
+            next: job => { this.labJob = job; this.pollLab(job.id); },
+            error: error => { this.error = this.errorMessage(error); this.labRunning = false; }
+        });
+    }
+
+    private pollLab(id: string) {
+        this.stopLabPoll();
+        const poll = () => this.http.get<any>(this.api + `/lab/runs/${id}`).subscribe({
+            next: job => {
+                this.labJob = job;
+                if (job.status === 'COMPLETED' || job.status === 'FAILED') {
+                    if (job.status === 'FAILED') this.error = job.error || 'O laboratório não foi concluído.';
+                    this.labRunning = false; this.stopLabPoll(); this.loadLabRuns();
+                }
+            },
+            error: error => { this.error = this.errorMessage(error); this.labRunning = false; this.stopLabPoll(); }
+        });
+        poll();
+        this.labPoll = setInterval(poll, 2000);
+    }
+
+    private stopLabPoll() {
+        if (this.labPoll) clearInterval(this.labPoll);
+        this.labPoll = null;
+    }
+
+    loadLabRuns() {
+        this.loadingLabRuns = true;
+        this.http.get<any[]>(this.api + '/lab/runs').subscribe({
+            next: runs => { this.labRuns = runs; this.loadingLabRuns = false; },
+            error: error => { this.error = this.errorMessage(error); this.loadingLabRuns = false; }
+        });
+    }
+
+    openLabRun(run: any) {
+        if (this.labRunning) return;
+        this.labTab = run.game;
+        this.http.get<any>(this.api + `/lab/runs/${run.id}`).subscribe({
+            next: job => { this.labJob = job; if (job.status === 'FAILED') this.error = job.error || 'Esta execução falhou.'; },
+            error: error => this.error = this.errorMessage(error)
+        });
+    }
+
+    labGameName(game: string) { return game === 'megasena' ? 'Mega-Sena' : game === 'lotofacil' ? 'Lotofácil' : 'Bicho'; }
+
+    labRunLabel(run: any) {
+        const p = run.parameters || {};
+        return run.game === 'bicho'
+            ? `${p.bank} · ${p.time || 'todos os horários'} · ${p.testDays} dias · ${p.quantity} milhares`
+            : `${p.testContests} concursos · ${p.quantity} jogos simples`;
+    }
+
+    labRows(group: string) { return (this.labReport?.rows || []).filter((row: any) => row.group === group); }
+
+    labPValue(value: number | null | undefined) {
+        if (value === null || value === undefined) return '—';
+        return value < 0.001 ? '< 0,001' : value.toLocaleString('pt-BR', { maximumFractionDigits: 3, minimumFractionDigits: 3 });
+    }
+
+    labPercent(value: number | null | undefined, digits = 2) {
+        return ((Number(value) || 0) * 100).toLocaleString('pt-BR', { maximumFractionDigits: digits, minimumFractionDigits: digits }) + '%';
+    }
+
+    labCount(value: number | null | undefined) {
+        return (Number(value) || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
     }
 
     private stopDecisionBatteryPoll() {
